@@ -66,7 +66,7 @@ cell_types_cz = {
 
 parser = argparse.ArgumentParser(description="Sample information and hyperparameters")
 parser.add_argument("--sample", type=str, default="10x_5k_lung", help="Sample name consisting of platform, panel size, and organ")
-parser.add_argument("--he", type=str, default="he200", help="Side length of H&E image)")
+parser.add_argument("--he", type=str, default="he200", help="Side length of H&E image")
 parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
 parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
 parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
