@@ -1,1 +1,5 @@
 # SHEST
+
+```
+python main.py
+```
