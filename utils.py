@@ -1,15 +1,19 @@
 import os
+os.environ["PARAMETRICUMAP"] = "0"
+os.environ["UMAP_DISABLE_PARAMETRIC"] = "True"
+
 import gc
 from glob import glob
 from collections import Counter
 from tqdm import tqdm
+import umap
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import anndata
 
-import celltypist
+import tacco as tc
 import torch
 import torch.nn as nn
 import torchvision.transforms as transforms
@@ -46,8 +50,8 @@ class HEDataset(Dataset):
             image = self.transform(image)
         return cell_id, image
 
-def log_normalize(adata, counts_per_cell_after=10**4): # for celltypist
-    sc.pp.normalize_per_cell(adata, counts_per_cell_after=counts_per_cell_after)
+def log_normalize(adata, target_sum=1e4):
+    sc.pp.normalize_total(adata, target_sum=target_sum)
     sc.pp.log1p(adata)
     return adata
 
@@ -61,9 +65,6 @@ def preprocessing(adata):
 
     return adata
 
-def check_normalized(array):
-    print(np.expm1(array).sum(axis=1))
-
 def single_cell_reference(organ):
     if organ == 'lung':
         print("Loading LuCA single cell reference ... ", end='')
@@ -74,7 +75,7 @@ def single_cell_reference(organ):
         print(luca.shape)
         return luca
 
-def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='cell_type_tumor', debug=False):
+def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='cell_type_tumor'):
     print('Annotating types of the cells ... ')
     
     annotation_file = f"/data0/crp/annotation/cell_subtype_{sample}_{he}.h5ad"
@@ -90,47 +91,19 @@ def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='c
         adata = preprocessing(adata)
         print(adata.shape)
     
-        print('Extracting common features between reference and sample ... ', end='')
-        hvg = set(adata.var_names)
-    
-        features = list(set(ref.var_names) & hvg)
-        features.sort()
-        ref = ref[:, features].copy()
-        adata = adata[:, features].copy()
-        ref = log_normalize(ref)
-        adata = log_normalize(adata)
-    
-        print(ref.shape, adata.shape)
-    
-        if debug==True:
-            check_normalized(ref.X)
-            check_normalized(adata.X)
-    
-        model_file = f"/data0/crp/models/model_annotation_{sample}.pkl"
-        if not os.path.exists(model_file):
-            print('Training the model ...')
-            model = celltypist.train(
-                ref,
-                labels=cell_subtype,
-                n_jobs=n_cores,
-            )
-            model.write(model_file)
-        else:
-            print('Loading the model ...')
-            model = celltypist.models.Model.load(model_file)
-    
-        celltypist.annotate(adata, model=model, majority_voting = False).to_adata()
-    
+        adata.obs['Cell_subtype'] = tc.tl.annotate(adata, ref, annotation_key=cell_subtype, assume_valid_counts=True).T.idxmax()
+        adata.obs['Cell_type'] = adata.obs['Cell_subtype'].map({cell: group for group, cells in cell_types.items() for cell in cells}).astype('category')
+
         adata.write(annotation_file)
         
     else:
         adata = sc.read_h5ad(annotation_file)
 
-    print(len(adata.obs['predicted_labels'].unique()), 'subtypes are annotated.')
+    print(len(adata.obs['Cell_subtype'].unique()), 'subtypes are annotated.')
     
     print('Categorize the cell subtypes into cell types ...')
-    adata.obs['cell_subtype_st'] = adata.obs['predicted_labels'].map({cell: cell for group, cells in cell_types.items() for cell in cells}).astype('category')
-    adata.obs['cell_type_st'] = adata.obs['predicted_labels'].map({cell: group for group, cells in cell_types.items() for cell in cells}).astype('category')
+    adata.obs['cell_subtype_st'] = adata.obs['Cell_subtype'].map({cell: cell for group, cells in cell_types.items() for cell in cells}).astype('category')
+    adata.obs['cell_type_st'] = adata.obs['Cell_subtype'].map({cell: group for group, cells in cell_types.items() for cell in cells}).astype('category')
     print(len(adata.obs['cell_type_st'].unique()), 'types are annotated.')
 
     return adata
@@ -173,6 +146,7 @@ class PairedDataset():
             print(self.adata.shape)
             
             self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, sample=self.sample, he=self.he, n_cores=self.n_cores)
+            self.adata = log_normalize(self.adata)
             sc.pp.neighbors(self.adata)
             sc.tl.umap(self.adata)
         
