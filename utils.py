@@ -83,10 +83,6 @@ def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='c
     if not os.path.isfile(annotation_file):
         ref = single_cell_reference(sample.split('_')[-1])
 
-        print('Preprocessing reference adata ... ', end='')
-        ref = preprocessing(ref)
-        print(ref.shape)
-    
         print('Preprocessing adata ... ', end='')
         adata = preprocessing(adata)
         print(adata.shape)
