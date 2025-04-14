@@ -78,7 +78,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 '''
 Dataset
 '''
-directory = '/data0/xenium/paired_dataset/'
+directory = '/data0/paired_dataset/'
 paired_dataset = PairedDataset(n_cores, directory, args.sample, args.he, cell_types_cz)
 adata = paired_dataset.cell_select()
 paired_dataset.draw_umaps_expression()
