@@ -313,9 +313,9 @@ class Classification():
 
         self.cell_types_cz = cell_types_cz
         self.label_encoder = LabelEncoder()
-        if self.cell_type == 'cell_type_common':
+        if self.cell_type == 'cell_type_common' or self.cell_type == 'Cell_type':
             parameters = list(self.cell_types_cz.keys())
-        elif self.cell_type == 'cell_subtype_st':
+        elif self.cell_type == 'cell_subtype_st' or self.cell_type == 'Cell_subtype':
             parameters =  sum(self.cell_types_cz.values(), [])
         self.label_encoder.fit(parameters)
     
