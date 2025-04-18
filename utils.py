@@ -50,11 +50,6 @@ class HEDataset(Dataset):
             image = self.transform(image)
         return cell_id, image
 
-def log_normalize(adata, target_sum=1e4):
-    sc.pp.normalize_total(adata, target_sum=target_sum)
-    sc.pp.log1p(adata)
-    return adata
-
 def preprocessing(adata):
     adata.var_names_make_unique()
     adata.obs_names_make_unique()
@@ -142,7 +137,6 @@ class PairedDataset():
             print(self.adata.shape)
             
             self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, sample=self.sample, he=self.he, n_cores=self.n_cores)
-            self.adata = log_normalize(self.adata)
             sc.pp.neighbors(self.adata)
             sc.tl.umap(self.adata)
         
