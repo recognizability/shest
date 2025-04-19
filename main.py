@@ -64,12 +64,16 @@ cell_types_cz = {
     ]
 }
 
-parser = argparse.ArgumentParser(description="Sample information and hyperparameters")
+parser = argparse.ArgumentParser(
+    description="Sample information and hyperparameters",                             
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
 parser.add_argument("--sample", type=str, default="10x_5k_lung", help="Sample name consisting of platform, panel size, and organ")
 parser.add_argument("--he", type=str, default="he200", help="Side length of H&E image")
 parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
 parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
 parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
+parser.add_argument("--force", type=bool, default=False, help="Forced training")
 args = parser.parse_args()
 
 n_cores = max(os.cpu_count()-2, 1)
@@ -89,7 +93,7 @@ train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
 Reconstruction
 '''
 reconstruction = Reconstruction(seed, adata, args.sample, args.he)
-reconstruction.train(train_loader, args.epochs, args.lr, force=False)
+reconstruction.train(train_loader, args.epochs, args.lr, force=force)
 reconstruction.evaluate(test_loader)
 reconstruction.draw_umaps_embedding(palette_he)
 reconstruction.draw_heatmap(cell_types_cz, palette_he)
@@ -99,5 +103,5 @@ Classification
 '''
 for cell_type in ['cell_type_common', 'cell_subtype_st']:
     classification = Classification(adata, args.sample, args.he, cell_types_cz, cell_type)
-    classification.train(train_loader, args.epochs, args.lr, force=True)
+    classification.train(train_loader, args.epochs, args.lr, force=force)
     classification.evaluate(test_loader)
