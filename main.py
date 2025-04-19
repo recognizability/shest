@@ -93,7 +93,7 @@ train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
 Reconstruction
 '''
 reconstruction = Reconstruction(seed, adata, args.sample, args.he)
-reconstruction.train(train_loader, args.epochs, args.lr, force=force)
+reconstruction.train(train_loader, args.epochs, args.lr, force=args.force)
 reconstruction.evaluate(test_loader)
 reconstruction.draw_umaps_embedding(palette_he)
 reconstruction.draw_heatmap(cell_types_cz, palette_he)
@@ -103,5 +103,5 @@ Classification
 '''
 for cell_type in ['cell_type_common', 'cell_subtype_st']:
     classification = Classification(adata, args.sample, args.he, cell_types_cz, cell_type)
-    classification.train(train_loader, args.epochs, args.lr, force=force)
+    classification.train(train_loader, args.epochs, args.lr, force=args.force)
     classification.evaluate(test_loader)
