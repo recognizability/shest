@@ -82,6 +82,7 @@ class Model(nn.Module):
 class Reconstruction():
     def __init__(self, seed, adata, sample, he):
         
+        self.seed = seed
         self.adata = adata
         self.model = Model(out_features=adata.shape[1])
 
@@ -248,12 +249,16 @@ class Reconstruction():
 
         fig, ax = plt.subplots(1, 2, figsize=(7, 3))
         
+        sc.pp.normalize_total(adata_actual, target_sum=1e4)
+        sc.pp.log1p(adata_actual)
         sc.pp.neighbors(adata_actual)
-        sc.tl.umap(adata_actual)
+        sc.tl.umap(adata_actual, random_state=self.seed)
         sc.pl.umap(adata_actual, color=group, palette=palette_he, show=False, ax=ax[0], legend_loc=None)
         
+        sc.pp.normalize_total(adata_reconstruction, target_sum=1e4)
+        sc.pp.log1p(adata_reconstruction)
         sc.pp.neighbors(adata_reconstruction)
-        sc.tl.umap(adata_reconstruction)
+        sc.tl.umap(adata_reconstruction, random_state=self.seed)
         sc.pl.umap(adata_reconstruction, color=group, palette=palette_he, show=False, ax=ax[1])
         
         fig.tight_layout()
