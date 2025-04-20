@@ -70,21 +70,20 @@ parser = argparse.ArgumentParser(
 )
 parser.add_argument("--sample", type=str, default="10x_5k_lung", help="Sample name consisting of platform, panel size, and organ")
 parser.add_argument("--he", type=str, default="he200", help="Side length of H&E image")
-parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
+parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
 parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
 parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
 parser.add_argument("--train_reconstructor", type=bool, default=False, help="Forced retraining the reconstruction model")
 parser.add_argument("--train_classifier", type=bool, default=False, help="Forced retraining the classification model")
 args = parser.parse_args()
 
-n_cores = max(os.cpu_count()-2, 1)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 '''
 Dataset
 '''
 directory = '/data0/paired_dataset/'
-paired_dataset = PairedDataset(n_cores, directory, args.sample, args.he, cell_types_cz)
+paired_dataset = PairedDataset(directory, args.sample, args.he, cell_types_cz)
 adata = paired_dataset.cell_select()
 paired_dataset.draw_umaps_expression()
 palette_he = paired_dataset.palette_he
@@ -94,9 +93,9 @@ train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
 Reconstruction
 '''
 reconstruction = Reconstruction(seed, adata, args.sample, args.he)
-reconstruction.train(train_loader, args.epochs, args.lr, force=args.train_reconstructor)
+reconstruction.load(train_loader, args.epochs, args.lr, train=args.train_reconstructor)
 reconstruction.evaluate(test_loader)
-reconstruction.draw_umaps_embedding(palette_he)
+#reconstruction.draw_umaps_embedding(palette_he)
 reconstruction.draw_heatmap(cell_types_cz, palette_he)
 
 '''
@@ -104,5 +103,5 @@ Classification
 '''
 for cell_type in ['cell_type_common', 'cell_subtype_st']:
     classification = Classification(adata, args.sample, args.he, cell_types_cz, cell_type)
-    classification.train(train_loader, args.epochs, args.lr, force=args.train_classifier)
+    classification.load(train_loader, args.epochs, args.lr, train=args.train_classifier)
     classification.evaluate(test_loader)

@@ -54,7 +54,7 @@ class Decoder(nn.Module):
         x = self.dropout(x)
         x = F.relu(self.bn2(self.fc2(x)))
         x = self.dropout(x)
-        x = self.fc3(x)
+        x = F.relu(self.fc3(x))
         return x
 
     def reset_parameters(self):
@@ -67,7 +67,7 @@ class Decoder(nn.Module):
                     nn.init.ones_(module.weight)
                     nn.init.zeros_(module.bias)
 
-class Model(nn.Module):
+class Reconstructor(nn.Module):
     def __init__(self, out_features):
         super().__init__()
         self.out_features = out_features
@@ -84,7 +84,7 @@ class Reconstruction():
         
         self.seed = seed
         self.adata = adata
-        self.model = Model(out_features=adata.shape[1])
+        self.reconstructor = Reconstructor(out_features=adata.shape[1])
 
         self.sample = sample
         self.he = he
@@ -98,19 +98,19 @@ class Reconstruction():
 
         self.criterion = nn.HuberLoss()
 
-    def train(self, train_loader, epochs, lr, force=False):
-        model_file = f"/data0/crp/models/model_reconstruction_{self.sample}_{self.he}.pth"
-        if not os.path.isfile(model_file) or force:
-            self.model.to(device)
+    def load(self, train_loader, epochs, lr, force=False):
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.sample}_{self.he}.pth"
+        if not os.path.isfile(reconstructor_file) or train:
+            self.reconstructor.to(device)
             
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=1e-5)
+            optimizer = torch.optim.Adam(self.reconstructor.parameters(), lr=lr, weight_decay=1e-5)
 
             gc.collect()
             torch.cuda.empty_cache()
             
             print(f"Training the reconstruction model ...")
             for epoch in range(epochs):
-                self.model.train()
+                self.reconstructor.train()
                 train_loss = 0
                 for cell_id, image in tqdm(train_loader):
                     image = image.to(device, non_blocking=True)
@@ -118,7 +118,7 @@ class Reconstruction():
                         self.adata[cell_id, :].X.toarray(), dtype=torch.float32, device=device
                     )
                     
-                    reconstruction = self.model(image)
+                    reconstruction = self.reconstructor(image)
                     reconstruction = reconstruction.to(device)
 
                     optimizer.zero_grad()
@@ -133,13 +133,13 @@ class Reconstruction():
             gc.collect()
             torch.cuda.empty_cache()
 
-            torch.save(self.model.state_dict(), model_file)
+            torch.save(self.reconstructor.state_dict(), reconstructor_file)
         else: 
-            self.model.load_state_dict(torch.load(model_file, map_location=device))
+            self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
 
     def evaluate(self, test_loader):
-        self.model.to(device)
-        self.model.eval()
+        self.reconstructor.to(device)
+        self.reconstructor.eval()
 
         images = [] 
         expressions = []
@@ -163,10 +163,10 @@ class Reconstruction():
                 )
                 expressions.append(expression)
                 
-                embedding = self.model.encoder(image)
+                embedding = self.reconstructor.encoder(image)
                 embeddings.append(embedding)
 
-                reconstruction = self.model(image)
+                reconstruction = self.reconstructor(image)
                 reconstruction = reconstruction.to(device)
                 reconstructions.append(reconstruction)
 
@@ -253,13 +253,13 @@ class Reconstruction():
         sc.pp.log1p(adata_actual)
         sc.pp.neighbors(adata_actual)
         sc.tl.umap(adata_actual, random_state=self.seed)
-        sc.pl.umap(adata_actual, color=group, palette=palette_he, show=False, ax=ax[0], legend_loc=None)
+        sc.pl.umap(adata_actual, color=group, palette=palette_he, show=False, ax=ax[0], legend_loc=None, use_raw=False)
         
         sc.pp.normalize_total(adata_reconstruction, target_sum=1e4)
         sc.pp.log1p(adata_reconstruction)
         sc.pp.neighbors(adata_reconstruction)
         sc.tl.umap(adata_reconstruction, random_state=self.seed)
-        sc.pl.umap(adata_reconstruction, color=group, palette=palette_he, show=False, ax=ax[1])
+        sc.pl.umap(adata_reconstruction, color=group, palette=palette_he, show=False, ax=ax[1], use_raw=False)
         
         fig.tight_layout()
         plt.close()
@@ -277,13 +277,13 @@ class Reconstruction():
         top_markers = sum(top_markers, [])
         
         sc.tl.dendrogram(adata_actual, groupby=group)
-        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False)
+        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False)
         plt.savefig(f'/data0/crp/results/expression_actual_{self.sample}_{self.he}.png')
         plt.close()
         
         sc.tl.dendrogram(adata_reconstruction, groupby=group)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=group)
-        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False)
+        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False)
         plt.savefig(f'/data0/crp/results/expression_reconstruction_{self.sample}_{self.he}.png')
         plt.close()
 
@@ -306,12 +306,12 @@ class Classification():
         self.sample = sample
         self.he = he
 
-        model = Model(out_features=adata.shape[1])
-        model_file = f"/data0/crp/models/model_reconstruction_{self.sample}_{self.he}.pth"
-        model.load_state_dict(torch.load(model_file, map_location=device))
-        self.encoder = model.encoder
-        self.encoder.to(device)
-        self.encoder.eval()
+        self.reconstructor = Reconstructor(out_features=adata.shape[1])
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.sample}_{self.he}.pth"
+        self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
+        self.reconstructor.to(device)
+        self.reconstructor.eval()
+        self.encoder = self.reconstructor.encoder
         
         self.cell_type = cell_type
         self.cell_type_encoded = self.cell_type + '_encoded'
@@ -325,7 +325,8 @@ class Classification():
         self.label_encoder.fit(parameters)
     
         self.adata = adata
-        self.adata_local = self.adata[self.adata.obs[self.cell_type].notna(), :] 
+        self.adata_local = self.adata[self.adata.obs[self.cell_type].notna(), :].copy()
+        #self.adata_local = self.adata[~self.adata.obs[self.cell_type].isna(), :].copy()
         self.adata_local.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata_local.obs[self.cell_type])
 
         self.classifier = Classifier(num_classes=len(parameters))
@@ -333,7 +334,7 @@ class Classification():
 
         self.criterion = nn.CrossEntropyLoss()
 
-    def train(self, train_loader, epochs, lr, force=False):
+    def load(self, train_loader, epochs, lr, train=False):
         classifier_file = f"/data0/crp/models/classifier_{self.sample}_{self.he}_{self.cell_type}.pth"
         if not os.path.isfile(classifier_file) or force:
             optimizer = torch.optim.AdamW(self.classifier.parameters(), lr=lr, weight_decay=1e-4)

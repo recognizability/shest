@@ -24,6 +24,9 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+n_cores = max(os.cpu_count()-2, 1)
+sc.settings.n_jobs = n_cores
+
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -70,7 +73,7 @@ def single_cell_reference(organ):
         print(luca.shape)
         return luca
 
-def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='cell_type_tumor'):
+def cell_type_annotation(adata, cell_types, sample, he, cell_subtype='cell_type_tumor'):
     print('Annotating types of the cells ... ')
     
     annotation_file = f"/data0/crp/annotation/cell_subtype_{sample}_{he}.h5ad"
@@ -100,8 +103,7 @@ def cell_type_annotation(adata, cell_types, sample, he, n_cores, cell_subtype='c
     return adata
 
 class PairedDataset():
-    def __init__(self, n_cores, directory, sample, he, cell_types_cz):
-        self.n_cores = n_cores
+    def __init__(self, directory, sample, he, cell_types_cz):
         self.directory = directory
         self.sample = sample
         self.he = he
@@ -120,7 +122,7 @@ class PairedDataset():
         cells_path = os.path.join(directory, sample, he, '*')
         self.cell_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
         dataset = HEDataset(self.cell_ids, directory, sample, he)
-        self.dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=self.n_cores, pin_memory=True)
+        self.dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=n_cores, pin_memory=True)
 
         self.adata = None
         self.common_ids = None
@@ -136,7 +138,7 @@ class PairedDataset():
             self.adata.obs['cell_type_he'] = self.adata.obs[cell_type_he]
             print(self.adata.shape)
             
-            self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, sample=self.sample, he=self.he, n_cores=self.n_cores)
+            self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, sample=self.sample, he=self.he)
             sc.pp.neighbors(self.adata)
             sc.tl.umap(self.adata)
         
@@ -200,6 +202,6 @@ class PairedDataset():
         generator = torch.Generator().manual_seed(seed)
         train_dataset, test_dataset = random_split(self.dataloader_selected.dataset, [train_size, test_size], generator=generator)
     
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=self.n_cores, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=self.n_cores, pin_memory=True) 
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_cores, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True) 
         return train_loader, test_loader

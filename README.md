@@ -23,7 +23,7 @@ options:
                         10x_5k_lung)
   --he HE               Side length of H&E image (default: he200)
   --batch_size BATCH_SIZE
-                        Batch size of data loader (default: 512)
+                        Batch size of data loader (default: 128)
   --epochs EPOCHS       Number of epochs in training (default: 20)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --train_reconstructor TRAIN_RECONSTRUCTOR
