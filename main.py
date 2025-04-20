@@ -95,7 +95,7 @@ Reconstruction
 reconstruction = Reconstruction(seed, adata, args.sample, args.he)
 reconstruction.load(train_loader, args.epochs, args.lr, train=args.train_reconstructor)
 reconstruction.evaluate(test_loader)
-#reconstruction.draw_umaps_embedding(palette_he)
+reconstruction.draw_umaps_embedding(palette_he)
 reconstruction.draw_heatmap(cell_types_cz, palette_he)
 
 '''

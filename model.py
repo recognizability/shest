@@ -339,7 +339,7 @@ class Classification():
         if not os.path.isfile(classifier_file) or force:
             optimizer = torch.optim.AdamW(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
             
-            print(f"Training the prediction model ...")
+            print(f"Training the {self.cell_type} prediction model ...")
             for epoch in range(epochs):
                 self.classifier.train()
             
