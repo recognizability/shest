@@ -98,7 +98,7 @@ class Reconstruction():
 
         self.criterion = nn.HuberLoss()
 
-    def load(self, train_loader, epochs, lr, force=False):
+    def load(self, train_loader, epochs, lr, train=False):
         reconstructor_file = f"/data0/crp/models/reconstructor_{self.sample}_{self.he}.pth"
         if not os.path.isfile(reconstructor_file) or train:
             self.reconstructor.to(device)
@@ -170,7 +170,7 @@ class Reconstruction():
                 reconstruction = reconstruction.to(device)
                 reconstructions.append(reconstruction)
 
-                cell_labels.extend(self.adata[cell_id, :].obs['cell_type_common'].values.tolist())
+                cell_labels.extend(self.adata[cell_id, :].obs['Cell_type'].values.tolist())
 
                 loss = self.criterion(reconstruction, expression)
                 test_loss += loss.item()
@@ -235,7 +235,7 @@ class Reconstruction():
         plt.close()
 
     def draw_heatmap(self, cell_types_cz, palette_he):
-        group='cell_type_common'
+        group='Cell_type'
         adata_actual = anndata.AnnData(
             X = self.expressions,
             var = pd.DataFrame(index=self.adata.var_names),
@@ -318,25 +318,25 @@ class Classification():
 
         self.cell_types_cz = cell_types_cz
         self.label_encoder = LabelEncoder()
-        if self.cell_type == 'cell_type_common' or self.cell_type == 'Cell_type':
-            parameters = list(self.cell_types_cz.keys())
-        elif self.cell_type == 'cell_subtype_st' or self.cell_type == 'Cell_subtype':
-            parameters =  sum(self.cell_types_cz.values(), [])
-        self.label_encoder.fit(parameters)
+        if self.cell_type == 'Cell_type':
+            self.parameters = list(self.cell_types_cz.keys())
+        elif self.cell_type == 'Cell_subtype_ST' or self.cell_type == 'Cell_subtype':
+            self.parameters =  sum(self.cell_types_cz.values(), [])
+        self.label_encoder.fit(self.parameters)
     
         self.adata = adata
         self.adata_local = self.adata[self.adata.obs[self.cell_type].notna(), :].copy()
         #self.adata_local = self.adata[~self.adata.obs[self.cell_type].isna(), :].copy()
         self.adata_local.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata_local.obs[self.cell_type])
 
-        self.classifier = Classifier(num_classes=len(parameters))
+        self.classifier = Classifier(num_classes=len(self.parameters))
         self.classifier.to(device)
 
         self.criterion = nn.CrossEntropyLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
         classifier_file = f"/data0/crp/models/classifier_{self.sample}_{self.he}_{self.cell_type}.pth"
-        if not os.path.isfile(classifier_file) or force:
+        if not os.path.isfile(classifier_file) or train:
             optimizer = torch.optim.AdamW(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
             
             print(f"Training the {self.cell_type} prediction model ...")
@@ -416,10 +416,10 @@ class Classification():
         f1 = f1_score(cell_labels, cell_predictions, average='weighted')
         print('Average F1 score', f1)
     
-        cm = confusion_matrix(cell_labels, cell_predictions)
+        cm = confusion_matrix(cell_labels, cell_predictions, labels=self.parameters)
         
-        plt.figure(figsize=(6, 4))
-        sns.heatmap(cm, annot=True, fmt='d', xticklabels=np.unique(cell_labels), yticklabels=np.unique(cell_labels))
+        plt.figure(figsize=(len(self.parameters)//2+2, len(self.parameters)//2))
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.parameters, yticklabels=self.parameters)
         plt.title(f"{self.cell_type} (f1={f1:.4f})") 
         plt.xlabel('Prediction') 
         plt.ylabel('Label')

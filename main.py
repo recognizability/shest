@@ -95,13 +95,13 @@ Reconstruction
 reconstruction = Reconstruction(seed, adata, args.sample, args.he)
 reconstruction.load(train_loader, args.epochs, args.lr, train=args.train_reconstructor)
 reconstruction.evaluate(test_loader)
-reconstruction.draw_umaps_embedding(palette_he)
+#reconstruction.draw_umaps_embedding(palette_he)
 reconstruction.draw_heatmap(cell_types_cz, palette_he)
 
 '''
 Classification
 '''
-for cell_type in ['cell_type_common', 'cell_subtype_st']:
+for cell_type in ['Cell_type', 'Cell_subtype_ST']:
     classification = Classification(adata, args.sample, args.he, cell_types_cz, cell_type)
     classification.load(train_loader, args.epochs, args.lr, train=args.train_classifier)
     classification.evaluate(test_loader)
