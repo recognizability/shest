@@ -25,8 +25,8 @@ PIXEL_SIZE = 0.2125  # micrometers per pixel
 UPPER_THRESHOLD = 200
 ORGAN = '10x_5k_lung'
 AFFINE_MATRIX_PATH = Path("./xenium_prime_link/Human_Lung_Cancer/Xenium_Prime_Human_Lung_Cancer_FFPE_he_imagealignment.csv")
-DATA_DIR = Path("data")
-ZARR_DIR = Path("xenium_link/Human_Lung_Cancer/data.zarr")
+DATA_DIR = Path("xenium_prime_link")
+ZARR_DIR = Path("xenium_prime_link/Human_Lung_Cancer/data.zarr")
 
 # Parse and save Xenium data once
 
@@ -69,16 +69,20 @@ def crop_he_image(cell_id: str, sdata: sd.SpatialData, affine: np.ndarray,
 # Postprocessing
 
 def filter_cells(trans_obs: pd.DataFrame) -> tuple[pd.Index,int]:
+    """Filter cells to keep only those within central 80% area (excluding top 10% and bottom 10%)."""
     areas = trans_obs['cell_area']
-    low, high = np.percentile(areas,10), UPPER_THRESHOLD
-    filt = trans_obs[(areas>=low)&(areas<high)]
-    # determine crop_size by largest area cell
-    cid = filt.loc[areas.idxmax(),'cell_id']
-    poly = sdata.shapes['cell_boundaries'].loc[cid,'geometry']
-    rect = poly.minimum_rotated_rectangle.exterior.coords[:-1]
-    edges = np.linalg.norm(np.diff(rect,axis=0),axis=1)
-    size = int(max(edges)/PIXEL_SIZE)
-    size += size%2
+    low, high = np.percentile(areas, 10), UPPER_THRESHOLD
+    filt = trans_obs[(areas >= low) & (areas < high)]
+    if filt.empty:
+        raise ValueError("No cells remain after filtering by area.")
+    # determine crop_size by the cell with the largest area
+    max_obs_idx = filt['cell_area'].idxmax()
+    max_cell_id = filt.loc[max_obs_idx, 'cell_id']
+    poly = sdata.shapes['cell_boundaries'].loc[max_cell_id, 'geometry']
+    rect_coords = np.array(poly.minimum_rotated_rectangle.exterior.coords[:-1])
+    edges = np.linalg.norm(np.diff(rect_coords, axis=0), axis=1)
+    size = int(np.max(edges) / PIXEL_SIZE)
+    size += size % 2  # ensure even
     return filt['cell_id'], size
 
 # Main processing
