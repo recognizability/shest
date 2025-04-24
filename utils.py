@@ -33,10 +33,11 @@ transform = transforms.Compose([
 ])
 
 class HEDataset(Dataset):
-    def __init__(self, cell_ids, directory, sample, he, transform=transform):
+    def __init__(self, cell_ids, directory, platform, sample, he, transform=transform):
         self.cell_ids = cell_ids
         self.directory = directory
         self.transform = transform
+        self.platform = platform
         self.sample = sample
         self.he = he
 
@@ -45,7 +46,7 @@ class HEDataset(Dataset):
 
     def __getitem__(self, idx):
         cell_id = self.cell_ids[idx]
-        image_path = os.path.join(self.directory, self.sample, self.he, f'{cell_id}.png')
+        image_path = os.path.join(self.directory, self.platform, self.sample, self.he, f'{cell_id}.png')
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image)
@@ -73,13 +74,15 @@ def single_cell_reference(organ):
         print(luca.shape)
         return luca
 
-def cell_type_annotation(adata, cell_types, sample, he, cell_subtype='cell_type_tumor'):
+def cell_type_annotation(adata, cell_types, platform, sample, he, cell_subtype='cell_type_tumor'):
     print('Annotating types of the cells ... ')
     
-    annotation_file = f"/data0/crp/annotation/cell_subtype_{sample}_{he}.h5ad"
+    annotation_file = f"/data0/crp/annotation/cell_subtype_{platform}_{sample}_{he}.h5ad"
     
     if not os.path.isfile(annotation_file):
-        ref = single_cell_reference(sample.split('_')[-1])
+        if 'Lung' in sample or 'lung' in sample:
+            organ = 'lung'
+        ref = single_cell_reference(organ)
 
         print('Preprocessing adata ... ', end='')
         adata = preprocessing(adata)
@@ -103,8 +106,9 @@ def cell_type_annotation(adata, cell_types, sample, he, cell_subtype='cell_type_
     return adata
 
 class PairedDataset():
-    def __init__(self, directory, sample, he, cell_types_cz):
+    def __init__(self, directory, platform, sample, he, cell_types_cz):
         self.directory = directory
+        self.platform = platform
         self.sample = sample
         self.he = he
         self.cell_types_cz = cell_types_cz
@@ -118,9 +122,9 @@ class PairedDataset():
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes_st)).as_hex()
         ))
 
-        cells_path = os.path.join(directory, sample, he, '*')
+        cells_path = os.path.join(directory, platform, sample, he, '*')
         self.cell_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
-        dataset = HEDataset(self.cell_ids, directory, sample, he)
+        dataset = HEDataset(self.cell_ids, directory, platform, sample, he)
         self.dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=n_cores, pin_memory=True)
 
         self.adata = None
@@ -128,16 +132,16 @@ class PairedDataset():
         self.dataloader_selected = None
 
     def cell_select(self, cell_type_he='group', force=False):
-        annotation_file = f"/data0/crp/annotation/cell_type_{self.sample}_{self.he}.h5ad"
+        annotation_file = f"/data0/crp/annotation/cell_type_{self.platform}_{self.sample}_{self.he}.h5ad"
         
         if not os.path.isfile(annotation_file) or force:
             print('Expression profile and their cell types loading ... ', end='')
-            expression_file = os.path.join(self.directory, self.sample, f'expression_{self.he}.h5ad')
-            self.adata = sc.read_h5ad(expression_file)
+            adata_file = os.path.join(self.directory, self.platform, self.sample, f'adata_{self.he}.h5ad')
+            self.adata = sc.read_h5ad(adata_file)
             self.adata.obs['Cell_type_HE'] = self.adata.obs[cell_type_he]
             print(self.adata.shape)
             
-            self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, sample=self.sample, he=self.he)
+            self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, platform=self.platform, sample=self.sample, he=self.he)
             sc.pp.neighbors(self.adata)
             sc.tl.umap(self.adata)
         
@@ -192,7 +196,7 @@ class PairedDataset():
         sc.pl.umap(self.adata, color='Cell_type', palette=self.palette_he, ax=ax[3][1], show=False, legend_loc=None)
 
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_expression_{self.sample}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
     def loaders(self, seed, batch_size):

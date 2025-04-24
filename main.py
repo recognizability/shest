@@ -68,13 +68,16 @@ parser = argparse.ArgumentParser(
     description="Sample information and hyperparameters",                             
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
-parser.add_argument("--sample", type=str, default="10x_5k_lung", help="Sample name consisting of platform, panel size, and organ")
-parser.add_argument("--he", type=str, default="he200", help="Side length of H&E image")
+parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
+parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
+parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
+parser.add_argument("--he", type=str, default="he70", help="H&E images with side length")
 parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
 parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
 parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
-parser.add_argument("--train_reconstructor", type=bool, default=False, help="Forced retraining the reconstruction model")
-parser.add_argument("--train_classifier", type=bool, default=False, help="Forced retraining the classification model")
+parser.add_argument("--train_reconstructor", action="store_true", help="If set, retrain the reconstruction model")
+parser.add_argument("--train_classifier", action="store_true", help="If set, retrain the classification model"
+)
 args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -82,8 +85,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 '''
 Dataset
 '''
-directory = '/data0/paired_dataset/'
-paired_dataset = PairedDataset(directory, args.sample, args.he, cell_types_cz)
+paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, cell_types_cz)
 adata = paired_dataset.cell_select()
 paired_dataset.draw_umaps_expression()
 palette_he = paired_dataset.palette_he
@@ -92,7 +94,7 @@ train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
 '''
 Reconstruction
 '''
-reconstruction = Reconstruction(seed, adata, args.sample, args.he)
+reconstruction = Reconstruction(seed, adata, args.platform, args.sample, args.he)
 reconstruction.load(train_loader, args.epochs, args.lr, train=args.train_reconstructor)
 reconstruction.evaluate(test_loader)
 #reconstruction.draw_umaps_embedding(palette_he)
@@ -102,6 +104,6 @@ reconstruction.draw_heatmap(cell_types_cz, palette_he)
 Classification
 '''
 for cell_type in ['Cell_type', 'Cell_subtype_ST']:
-    classification = Classification(adata, args.sample, args.he, cell_types_cz, cell_type)
+    classification = Classification(adata, args.platform, args.sample, args.he, cell_types_cz, cell_type)
     classification.load(train_loader, args.epochs, args.lr, train=args.train_classifier)
     classification.evaluate(test_loader)

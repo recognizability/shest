@@ -48,7 +48,7 @@ def crop_he_image(cell_id):
     y_min = int(he_y - half)
     y_max = int(he_y + half)
 
-    image_path = f'{processed_path}he_{crop_size}_micrometer/'
+    image_path = processed_path + f'he{crop_size}/'
     os.makedirs(image_path, exist_ok=True)
     if 0 <= x_min and x_max < image_width and 0 <= y_min and y_max < image_height:
         cropped_image = he_image_array[:, y_min:y_max, x_min:x_max]
@@ -114,20 +114,25 @@ cell_boundaries = sdata.shapes["cell_boundaries"]
 processed_path = f"/data0/crp/dataset/{platform}/{sample}/"
 os.makedirs(processed_path, exist_ok=True)
 
-'''
-H&E annotation
-'''
 he_annotation = pd.read_csv(processed_path + f"annotation/merged_output.csv")
 he_annotation.set_index("cell_id")[["group"]]
-he_annotation.to_csv(processed_path + "annotation/he_annotation.csv")
+he_annotation.to_csv(processed_path + "annotation/he_annotation.csv", index=False)
 he_annotation["cell_id"] = he_annotation["cell_id"].astype(str)
 
-adata = sdata.tables["table"]
 he_image = sdata.images["he_image"]["scale0"]
 he_image_array = he_image["image"].values 
-image_channels, image_height, image_width = he_image_array.shape  # (C, Y, X)
+image_channels, image_height, image_width = he_image_array.shape #(c, y, x)
 
 annotated_cell_ids = he_annotation["cell_id"].unique()
 filtered_cell_ids = cell_area_filter()
 cell_ids = set(annotated_cell_ids) & set(filtered_cell_ids)
 crop_cells(cell_ids)
+
+adata = sdata.tables['table']
+adata = adata[adata.obs['cell_id'].isin(cell_ids), :].copy()
+adata.obs.index = adata.obs['cell_id']
+he_annotation.index = he_annotation['cell_id']
+adata.obs = adata.obs.merge(he_annotation['group'], how='left', left_index=True, right_index=True)
+adata.obs['group'] = adata.obs['group'].astype(str)
+adata.obs = adata.obs[['group']]
+adata.write(processed_path + f'adata_he{crop_size}.h5ad')

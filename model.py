@@ -80,12 +80,13 @@ class Reconstructor(nn.Module):
         return x.squeeze(1)
 
 class Reconstruction():
-    def __init__(self, seed, adata, sample, he):
+    def __init__(self, seed, adata, platform, sample, he):
         
         self.seed = seed
         self.adata = adata
         self.reconstructor = Reconstructor(out_features=adata.shape[1])
 
+        self.platform = platform
         self.sample = sample
         self.he = he
         
@@ -99,7 +100,7 @@ class Reconstruction():
         self.criterion = nn.HuberLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.sample}_{self.he}.pth"
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}.pth"
         if not os.path.isfile(reconstructor_file) or train:
             self.reconstructor.to(device)
             
@@ -231,7 +232,7 @@ class Reconstruction():
         plt.legend(markers, palette_he.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.sample}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self, cell_types_cz, palette_he):
@@ -278,13 +279,13 @@ class Reconstruction():
         
         sc.tl.dendrogram(adata_actual, groupby=group)
         sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f'/data0/crp/results/expression_actual_{self.sample}_{self.he}.png')
+        plt.savefig(f'/data0/crp/results/expression_actual_{self.platform}_{self.sample}_{self.he}.png')
         plt.close()
         
         sc.tl.dendrogram(adata_reconstruction, groupby=group)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=group)
         sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f'/data0/crp/results/expression_reconstruction_{self.sample}_{self.he}.png')
+        plt.savefig(f'/data0/crp/results/expression_reconstruction_{self.platform}_{self.sample}_{self.he}.png')
         plt.close()
 
 class Classifier(nn.Module):
@@ -302,12 +303,13 @@ class Classifier(nn.Module):
                 module.reset_parameters()
 
 class Classification():
-    def __init__(self, adata, sample, he, cell_types_cz, cell_type):
+    def __init__(self, adata, platform, sample, he, cell_types_cz, cell_type):
+        self.platform = platform
         self.sample = sample
         self.he = he
 
         self.reconstructor = Reconstructor(out_features=adata.shape[1])
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.sample}_{self.he}.pth"
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}.pth"
         self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
         self.reconstructor.to(device)
         self.reconstructor.eval()
@@ -335,7 +337,7 @@ class Classification():
         self.criterion = nn.CrossEntropyLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
-        classifier_file = f"/data0/crp/models/classifier_{self.sample}_{self.he}_{self.cell_type}.pth"
+        classifier_file = f"/data0/crp/models/classifier_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.pth"
         if not os.path.isfile(classifier_file) or train:
             optimizer = torch.optim.AdamW(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
             
@@ -424,7 +426,7 @@ class Classification():
         plt.xlabel('Prediction') 
         plt.ylabel('Label')
 
-        plt.savefig(f'/data0/crp/results/confusion_matrix_{self.sample}_{self.he}_{self.cell_type}.png', bbox_inches="tight")
+        plt.savefig(f'/data0/crp/results/confusion_matrix_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.png', bbox_inches="tight")
         plt.close()
     
     def infer(self, inference_loader):
