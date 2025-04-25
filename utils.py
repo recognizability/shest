@@ -24,7 +24,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-n_cores = max(os.cpu_count()-2, 1)
+import config
+
 sc.settings.n_jobs = n_cores
 
 transform = transforms.Compose([
@@ -71,22 +72,22 @@ class PairedDataset():
         self.sample = sample
         self.he = he
         self.cell_types = cell_types
-        self.palette_type = dict(zip(
-            self.cell_types.keys(),
-            sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())).as_hex()
-        ))
+        type_colors = sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())-1).as_hex()
+        type_colors.append('#000000')
+        self.palette_type = dict(zip(self.cell_types.keys(), type_colors))
         self.cell_subtypes = sum(cell_types.values(), [])
         self.palette_subtype = dict(zip(
             self.cell_subtypes,
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
-        cells_path = os.path.join(directory, platform, sample, he, '*')
-        self.cell_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
-        dataset = HEDataset(self.cell_ids, directory, platform, sample, he)
+        cells_path = os.path.join(directory, platform, sample, he, '*.png')
+        self.image_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
+        dataset = HEDataset(self.image_ids, directory, platform, sample, he)
         self.dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=n_cores, pin_memory=True)
 
         self.adata = None
+        self.type_ids = None
         self.common_ids = None
         self.dataloader_selected = None
 
@@ -96,30 +97,17 @@ class PairedDataset():
         self.adata = sc.read_h5ad(adata_file)
         print(self.adata.shape)
         
-        self.adata.obs['Cell_type_ST'] = self.adata.obs['Cell_type_ST'].astype(str)
-        self.adata.obs['Cell_type_HE'] = self.adata.obs['Cell_type_HE'].astype(str)
-        self.adata.obs['Cell_type'] = self.adata.obs.loc[self.adata.obs['Cell_type_ST']==self.adata.obs['Cell_type_HE'], 'Cell_type_HE']
-        self.common_ids = self.adata[self.adata.obs['Cell_type'].notna(), :].obs.index
+        self.type_ids = self.adata[self.adata.obs['Cell_type'].notna(), :].obs.index
+        self.common_ids = list(set(self.image_ids) & set(self.type_ids))
+        self.common_ids.sort()
         print('Common', len(self.common_ids), "cells are selected.")
-        print('Setting neighbors for each cell ...')
-        sc.pp.neighbors(self.adata, random_state=seed)
-        print('Making UMAPs for each cell ...')
-        sc.tl.umap(self.adata, random_state=seed)
-        selected_indices = [self.cell_ids.index(cell_id) for cell_id in self.cell_ids if cell_id in self.common_ids]
+        selected_indices = [self.image_ids.index(cell_id) for cell_id in self.common_ids]
         self.dataloader_selected = DataLoader(Subset(self.dataloader.dataset, selected_indices), batch_size=self.dataloader.batch_size, shuffle=False)
 
         return self.adata
 
     def draw_umaps_expression(self, cell_subtype):
         fig, ax = plt.subplots(3, 2, figsize=(7, 9))
-
-#        sns.barplot(
-#           pd.DataFrame(self.adata.obs.groupby([cell_subtype]).apply(len, include_groups=False), columns=['']).reindex(self.cell_subtypes).T,
-#           orient = 'h',
-#           palette = self.palette_subtype,
-#           ax=ax[0][0]
-#        )
-#        sc.pl.umap(self.adata, color=cell_subtype, palette=self.palette_subtype, ax=ax[0][1], show=False, legend_loc=None)
 
         sns.barplot(
            pd.DataFrame(self.adata.obs.groupby(['Cell_type_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
@@ -152,6 +140,7 @@ class PairedDataset():
     def loaders(self, seed, batch_size):
         train_size = int(0.8 * len(self.common_ids))
         test_size = len(self.common_ids) - train_size
+        print(f'The size of the train set if {train_size}, and the size of the test set is {test_size}.')
         generator = torch.Generator().manual_seed(seed)
         train_dataset, test_dataset = random_split(self.dataloader_selected.dataset, [train_size, test_size], generator=generator)
     

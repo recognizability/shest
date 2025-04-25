@@ -19,64 +19,9 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-parser = argparse.ArgumentParser(
-    description="Sample information", 
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
-parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
-parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
-parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
-args = parser.parse_args()
+import config
 
-n_cores = max(mp.cpu_count()-2, 1)
 sc.settings.n_jobs = n_cores
-pixel_size = json.load(open(f"/data0/{args.platform}/{args.sample}/experiment.xenium"))['pixel_size'] # micrometers per pixel
-lower_bound = int(4 // pixel_size) #micrometer/(micrometer/pixel)
-upper_bound = int(15 // pixel_size) #micrometer/(micrometer/pixel)
-crop_size = upper_bound
-
-cell_types_lung = {
-    'Tumor_cell_LUAD': [
-        'Tumor cells LUAD',
-        'Tumor cells LUAD EMT',
-        'Tumor cells LUAD MSLN',
-        'Tumor cells LUAD NE',
-        'Tumor cells LUAD mitotic'
-    ],
-    'Stromal_cell': [
-        'stromal dividing',
-        'Fibroblast adventitial',
-        'Fibroblast alveolar',
-        'Fibroblast peribronchial'
-    ],
-    'Pericyte':[
-        'Pericyte',
-    ],
-    'Endothelial_cell': [
-        'Endothelial cell arterial',
-        'Endothelial cell capillary',
-        'Endothelial cell lymphatic',
-        'Endothelial cell venous',
-    ],
-    'Lymphocyte': [
-         'B cell',
-         'B cell dividing',
-         'Plasma cell',
-         'Plasma cell dividing',
-         'T cell regulatory',
-         'T cell CD4',
-         'T cell CD4 dividing',
-         'T cell CD8 activated',
-         'T cell CD8 dividing',
-         'T cell CD8 effector memory',
-         'T cell CD8 naive',
-         'T cell CD8 terminally exhausted',
-         'T cell NK-like',
-         'NK cell',
-         'NK cell dividing'
-    ],
-    'Other': [],
-}
 
 def prepare_sdata(path):
     path_zarr = path + "data.zarr" 
@@ -174,6 +119,7 @@ def annotation(cell_subtype):
     he_annotation = pd.read_csv(processed_path + f"annotation/merged_output.csv")
     he_annotation = he_annotation.set_index("cell_id")[["group"]]
     he_annotation.to_csv(processed_path + "annotation/he_annotation.csv")
+    he_annotation['Cell_type_HE'] = he_annotation['group'].astype(str)
     annotated_cell_ids = he_annotation.index
     
     adata = sdata.tables['table']
@@ -195,22 +141,44 @@ def annotation(cell_subtype):
     else: 
         adata = sc.read_h5ad(sc_annotation_h5ad)
 
-    adata.obs['Cell_type_ST'] = adata.obs[cell_subtype].map({cell: group for group, subtypes in cell_types.items() for cell in subtypes}).fillna('Other').astype('category')
-    #adata = adata[adata.obs['cell_id'].isin(annotated_cell_ids), :].copy()
-    adata.obs.index = adata.obs['cell_id']
-    he_annotation['Cell_type_HE'] = he_annotation['group']
-    adata.obs = adata.obs.merge(he_annotation['Cell_type_HE'], how='left', left_index=True, right_index=True)
-    adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE'].astype(str)
-    adata.obs = adata.obs[[cell_subtype, 'Cell_type_ST', 'Cell_type_HE']]
-    adata.write(processed_path + f'annotation/adata_he{crop_size}.h5ad')
+        adata_file = processed_path + f'annotation/adata_he{crop_size}.h5ad'
+        if not os.path.exists(adata_file):
+            adata.obs.index = adata.obs['cell_id']
+            adata.obs['Cell_type_ST'] = adata.obs[cell_subtype].map({cell: group for group, subtypes in cell_types.items() for cell in subtypes}).fillna('Other')
+            adata.obs = adata.obs.merge(he_annotation['Cell_type_HE'], how='left', left_index=True, right_index=True)
+            adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE']
+            adata.obs['Cell_type'] = adata.obs.loc[adata.obs['Cell_type_ST'].astype(str) == adata.obs['Cell_type_HE'].astype(str), 'Cell_type_HE']
+            adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE'].astype('category')
+            adata.obs = adata.obs[[cell_subtype, 'Cell_type_ST', 'Cell_type_HE', 'Cell_type']]
+
+            print('Setting neighbors for each cell ...')
+            sc.pp.neighbors(adata, random_state=seed)
+            print('Making UMAPs for each cell ...')
+            sc.tl.umap(adata, random_state=seed)
+
+            adata.write(adata_file)
 
     return annotated_cell_ids
 
-if 'lung' in args.sample or 'Lung' in args.sample:
-    organ = 'Lung'
-    cell_types = cell_types_lung
-
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Sample information", 
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
+    parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
+    parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
+    args = parser.parse_args()
+
+    pixel_size = json.load(open(f"/data0/{args.platform}/{args.sample}/experiment.xenium"))['pixel_size'] # micrometers per pixel
+    lower_bound = int(4 // pixel_size) #micrometer/(micrometer/pixel)
+    upper_bound = int(15 // pixel_size) #micrometer/(micrometer/pixel)
+    crop_size = upper_bound
+
+    if 'lung' in args.sample or 'Lung' in args.sample:
+        organ = 'Lung'
+        cell_types = cell_types_lung
+
     raw_path = f"/data0/{args.platform}/{args.sample}/"
     sdata = prepare_sdata(raw_path)
     affine = get_transformation(sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
