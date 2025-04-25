@@ -28,7 +28,8 @@ in_features = 768 # ViT output features
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16", pretrained=True):
         super().__init__()
-        self.encoder = getattr(models, backbone)(pretrained=pretrained)
+        base_model = getattr(models, backbone)(pretrained=pretrained)
+        self.encoder = base_model
 
     def forward(self, x):
         x = self.encoder._process_input(x)

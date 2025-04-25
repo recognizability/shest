@@ -10,16 +10,16 @@ from spatialdata.transformations import get_transformation
 import spatialdata_plot
 from spatialdata_io import xenium
 
-import multiprocessing as mp
 from multiprocessing import Pool
 from tqdm import tqdm
 
+from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-import config
+from config import n_cores, seed, cell_types_lung
 
 sc.settings.n_jobs = n_cores
 
@@ -69,11 +69,9 @@ def crop_he_image(cell_id):
     os.makedirs(image_path, exist_ok=True)
     if 0 <= x_min and x_max < image_width and 0 <= y_min and y_max < image_height:
         cropped_image = he_image_array[:, y_min:y_max, x_min:x_max]
-        fig, ax = plt.subplots(figsize=(5, 5))
-        ax.imshow(cropped_image.transpose(1, 2, 0)) # (c, y, x) to (y, x, c) 
-        ax.axis("off")   
-        fig.savefig(image_path + f"{cell_id}.png", bbox_inches="tight", pad_inches=0, dpi=300)
-        plt.close(fig)
+        cropped_image = np.transpose(cropped_image, (1, 2, 0)) # (c, y, x) to (y, x, c)
+        cropped_image = Image.fromarray(cropped_image)
+        cropped_image.save(image_path + f"{cell_id}.png")
     
 def cell_area_filter():
     bounds = sdata.shapes['cell_boundaries'].bounds
@@ -86,7 +84,7 @@ def cell_area_filter():
     sns.violinplot(bounds, x='width', ax=ax[0])
     sns.violinplot(bounds, x='height', ax=ax[1])
     fig.tight_layout()
-    fig.savefig(f"{processed_path}violinplot_width_height.png", bbox_inches="tight")
+    fig.savefig(f"/data0/crp/results/violinplot_{args.platform}_{args.sample}.png", bbox_inches="tight")
     plt.close(fig)
     
     filtered_cells = bounds[
@@ -125,7 +123,7 @@ def annotation(cell_subtype):
     adata = sdata.tables['table']
     sc_annotation_csv = processed_path + f'annotation/sc_annotation_{cell_subtype}.csv'
     sc_annotation_h5ad = processed_path + f'annotation/sc_annotation_{cell_subtype}.h5ad'
-    if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)):
+    if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)) or args.force_annotate:
         ref = single_cell_reference()
         print('Annotating types of the cells ... ')
         adata.obs[cell_subtype] = tc.tl.annotate(
@@ -137,24 +135,25 @@ def annotation(cell_subtype):
         ).T.idxmax()
         adata.obs[cell_subtype].to_csv(sc_annotation_csv)
         print(len(adata.obs[cell_subtype].unique()), 'subtypes are annotated.')
+
+        print('Setting neighbors for each cell ...')
+        sc.pp.neighbors(adata, random_state=seed)
+        print('Making UMAPs for each cell ...')
+        sc.tl.umap(adata, random_state=seed)
+
         adata.write_h5ad(sc_annotation_h5ad)
     else: 
         adata = sc.read_h5ad(sc_annotation_h5ad)
 
         adata_file = processed_path + f'annotation/adata_he{crop_size}.h5ad'
-        if not os.path.exists(adata_file):
+        if not os.path.exists(adata_file) or args.force_categorize:
             adata.obs.index = adata.obs['cell_id']
-            adata.obs['Cell_type_ST'] = adata.obs[cell_subtype].map({cell: group for group, subtypes in cell_types.items() for cell in subtypes}).fillna('Other')
+            adata.obs['Cell_subtype_ST'] = adata.obs[cell_subtype]
+            adata.obs['Cell_type_ST'] = adata.obs[cell_subtype].map({cell: group for group, subtypes in cell_types.items() for cell in subtypes})#.fillna('Other')
             adata.obs = adata.obs.merge(he_annotation['Cell_type_HE'], how='left', left_index=True, right_index=True)
-            adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE']
+            adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE']#.fillna('Other')
             adata.obs['Cell_type'] = adata.obs.loc[adata.obs['Cell_type_ST'].astype(str) == adata.obs['Cell_type_HE'].astype(str), 'Cell_type_HE']
-            adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE'].astype('category')
-            adata.obs = adata.obs[[cell_subtype, 'Cell_type_ST', 'Cell_type_HE', 'Cell_type']]
-
-            print('Setting neighbors for each cell ...')
-            sc.pp.neighbors(adata, random_state=seed)
-            print('Making UMAPs for each cell ...')
-            sc.tl.umap(adata, random_state=seed)
+            adata.obs = adata.obs[['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type']]
 
             adata.write(adata_file)
 
@@ -168,6 +167,8 @@ if __name__ == "__main__":
     parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
+    parser.add_argument("--force_annotate", action="store_true", help="If set, annotate again")
+    parser.add_argument("--force_categorize", action="store_true", help="If set, categorize again")
     args = parser.parse_args()
 
     pixel_size = json.load(open(f"/data0/{args.platform}/{args.sample}/experiment.xenium"))['pixel_size'] # micrometers per pixel

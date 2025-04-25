@@ -30,34 +30,29 @@ sc.settings.n_jobs = n_cores
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
-    transforms.ToTensor()
+    transforms.ToTensor(),
 ])
 
 class HEDataset(Dataset):
-    def __init__(self, cell_ids, directory, platform, sample, he, angles=[0]):
+    def __init__(self, cell_ids, directory, platform, sample, he, transform=transform):
         self.cell_ids = cell_ids
         self.directory = directory
+        self.transform = transform
         self.platform = platform
         self.sample = sample
         self.he = he
-        self.angles = angles
 
     def __len__(self):
-        return len(self.cell_ids) * len(self.angles)
+        return len(self.cell_ids)
 
-    def __getitem__(self, i):
-        base_i = i // len(self.angles)
-        angle_i = i % len(self.angles)
-
-        cell_id = self.cell_ids[base_i]
-        angle = self.angles[angle_i]
-
+    def __getitem__(self, idx):
+        cell_id = self.cell_ids[idx]
         image_path = os.path.join(self.directory, self.platform, self.sample, self.he, f'{cell_id}.png')
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image)
-        image = transforms.functional.rotate(image, angle)
-        image = transform(image)
+        if self.transform:
+            image = self.transform(image)
         return cell_id, image
 
 def preprocessing(adata):
@@ -77,13 +72,9 @@ class PairedDataset():
         self.sample = sample
         self.he = he
         self.cell_types = cell_types
-#        type_colors = sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())-1).as_hex()
-#        type_colors.append('#000000')
-#        self.palette_type = dict(zip(self.cell_types.keys(), type_colors))
-        self.palette_type = dict(zip(
-            self.cell_types.keys(), 
-            sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())).as_hex()
-        ))
+        type_colors = sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())-1).as_hex()
+        type_colors.append('#000000')
+        self.palette_type = dict(zip(self.cell_types.keys(), type_colors))
         self.cell_subtypes = sum(cell_types.values(), [])
         self.palette_subtype = dict(zip(
             self.cell_subtypes,
@@ -92,11 +83,13 @@ class PairedDataset():
 
         cells_path = os.path.join(directory, platform, sample, he, '*.png')
         self.image_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
-        self.dataloader = None
+        dataset = HEDataset(self.image_ids, directory, platform, sample, he)
+        self.dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=n_cores, pin_memory=True)
 
         self.adata = None
         self.type_ids = None
         self.common_ids = None
+        self.dataloader_selected = None
 
     def cell_select(self, force=False):
         print('Expression profile and their cell types loading ... ', end='')
@@ -108,6 +101,8 @@ class PairedDataset():
         self.common_ids = list(set(self.image_ids) & set(self.type_ids))
         self.common_ids.sort()
         print('Common', len(self.common_ids), "cells are selected.")
+        selected_indices = [self.image_ids.index(cell_id) for cell_id in self.common_ids]
+        self.dataloader_selected = DataLoader(Subset(self.dataloader.dataset, selected_indices), batch_size=self.dataloader.batch_size, shuffle=False)
 
         return self.adata
 
@@ -145,10 +140,10 @@ class PairedDataset():
     def loaders(self, batch_size):
         train_size = int(0.8 * len(self.common_ids))
         test_size = len(self.common_ids) - train_size
+        print(f'The size of the train set if {train_size}, and the size of the test set is {test_size}.')
         generator = torch.Generator().manual_seed(seed)
-        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, angles=[0, 90, 180, 270])
-        train_dataset, test_dataset = random_split(full_dataset, [train_size*4, test_size*4], generator=generator)
-        print(f'The size of the train set is {len(train_dataset)}, and the size of the test set is {len(test_dataset)}.')
+        train_dataset, test_dataset = random_split(self.dataloader_selected.dataset, [train_size, test_size], generator=generator)
+    
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_cores, pin_memory=True)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True) 
         return train_loader, test_loader
