@@ -1,4 +1,6 @@
 import os
+import argparse
+import json
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -15,12 +17,82 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 import scanpy as sc
+import tacco as tc
+
+parser = argparse.ArgumentParser(
+    description="Sample information", 
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
+parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
+parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
+parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
+args = parser.parse_args()
 
 n_cores = max(mp.cpu_count()-2, 1)
-pixel_size = 0.2125  # micrometers per pixel
-lower_bound = int(4 // pixel_size) #micrometer // pixel
-upper_bound = int(15 // pixel_size) #micrometer // pixel
+sc.settings.n_jobs = n_cores
+pixel_size = json.load(open(f"/data0/{args.platform}/{args.sample}/experiment.xenium"))['pixel_size'] # micrometers per pixel
+lower_bound = int(4 // pixel_size) #micrometer/(micrometer/pixel)
+upper_bound = int(15 // pixel_size) #micrometer/(micrometer/pixel)
 crop_size = upper_bound
+
+cell_types_lung = {
+    'Tumor_cell_LUAD': [
+        'Tumor cells LUAD',
+        'Tumor cells LUAD EMT',
+        'Tumor cells LUAD MSLN',
+        'Tumor cells LUAD NE',
+        'Tumor cells LUAD mitotic'
+    ],
+    'Stromal_cell': [
+        'stromal dividing',
+        'Fibroblast adventitial',
+        'Fibroblast alveolar',
+        'Fibroblast peribronchial'
+    ],
+    'Pericyte':[
+        'Pericyte',
+    ],
+    'Endothelial_cell': [
+        'Endothelial cell arterial',
+        'Endothelial cell capillary',
+        'Endothelial cell lymphatic',
+        'Endothelial cell venous',
+    ],
+    'Lymphocyte': [
+         'B cell',
+         'B cell dividing',
+         'Plasma cell',
+         'Plasma cell dividing',
+         'T cell regulatory',
+         'T cell CD4',
+         'T cell CD4 dividing',
+         'T cell CD8 activated',
+         'T cell CD8 dividing',
+         'T cell CD8 effector memory',
+         'T cell CD8 naive',
+         'T cell CD8 terminally exhausted',
+         'T cell NK-like',
+         'NK cell',
+         'NK cell dividing'
+    ],
+    'Other': [],
+}
+
+def prepare_sdata(path):
+    path_zarr = path + "data.zarr" 
+    if not os.path.exists(path_zarr):
+        sdata = xenium(
+            path=path,
+            n_jobs=n_cores,
+        )
+        print("Saving zarr ...")
+        sdata.write(path_zarr) 
+        print('Done.')
+    else:
+        print("Loading the zarr ...", end=' ')
+        sdata = sd.SpatialData.read(path_zarr)
+        print('done.')
+    return sdata
 
 def inverse_affine_transform(x_pixel, y_pixel):
     x_pixel = np.atleast_1d(x_pixel)
@@ -55,7 +127,7 @@ def crop_he_image(cell_id):
         fig, ax = plt.subplots(figsize=(5, 5))
         ax.imshow(cropped_image.transpose(1, 2, 0)) # (c, y, x) to (y, x, c) 
         ax.axis("off")   
-        fig.savefig(f"{processed_path}he_{crop_size}_micrometer/{cell_id}.png", bbox_inches="tight", pad_inches=0, dpi=300)
+        fig.savefig(image_path + f"{cell_id}.png", bbox_inches="tight", pad_inches=0, dpi=300)
         plt.close(fig)
     
 def cell_area_filter():
@@ -88,51 +160,70 @@ def crop_cells(cell_ids):
     pool.close()
     pool.join()
 
-def prepare_sdata(path):
-    path_zarr = path + "data.zarr" 
-    if not os.path.exists(path_zarr):
-        sdata = xenium(
-            path=path,
-            n_jobs=n_cores,
-        )
-        print("Saving zarr ...")
-        sdata.write(path_zarr) 
-        print('Done.')
-    else:
-        print("Loading the zarr ...", end=' ')
-        sdata = sd.SpatialData.read(path_zarr)
-        print('done.')
-    return sdata
+def single_cell_reference():
+    if organ == 'Lung':
+        print("Loading LuCA single cell reference ... ", end='')
+        ref = sc.read_h5ad('/data0/cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
+        ref.index = ref.var.feature_name
+        ref.var.index = ref.var.feature_name
+        ref = ref[ref.obs['platform']!='Smart-seq2'].copy()
+        print(ref.shape)
+    return ref
 
-platform = 'Xenium_Prime'
-sample = 'Human_Lung_Cancer'
-raw_path = f"/data0/{platform}/{sample}/"
-sdata = prepare_sdata(raw_path)
-affine = get_transformation(sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
-cell_boundaries = sdata.shapes["cell_boundaries"]
+def annotation(cell_subtype):
+    he_annotation = pd.read_csv(processed_path + f"annotation/merged_output.csv")
+    he_annotation = he_annotation.set_index("cell_id")[["group"]]
+    he_annotation.to_csv(processed_path + "annotation/he_annotation.csv")
+    annotated_cell_ids = he_annotation.index
+    
+    adata = sdata.tables['table']
+    sc_annotation_csv = processed_path + f'annotation/sc_annotation_{cell_subtype}.csv'
+    sc_annotation_h5ad = processed_path + f'annotation/sc_annotation_{cell_subtype}.h5ad'
+    if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)):
+        ref = single_cell_reference()
+        print('Annotating types of the cells ... ')
+        adata.obs[cell_subtype] = tc.tl.annotate(
+            adata,
+            ref,
+            annotation_key=cell_subtype,
+            assume_valid_counts=True,
+            remove_constant_genes=False,
+        ).T.idxmax()
+        adata.obs[cell_subtype].to_csv(sc_annotation_csv)
+        print(len(adata.obs[cell_subtype].unique()), 'subtypes are annotated.')
+        adata.write_h5ad(sc_annotation_h5ad)
+    else: 
+        adata = sc.read_h5ad(sc_annotation_h5ad)
 
-processed_path = f"/data0/crp/dataset/{platform}/{sample}/"
-os.makedirs(processed_path, exist_ok=True)
+    adata.obs['Cell_type_ST'] = adata.obs[cell_subtype].map({cell: group for group, subtypes in cell_types.items() for cell in subtypes}).fillna('Other').astype('category')
+    #adata = adata[adata.obs['cell_id'].isin(annotated_cell_ids), :].copy()
+    adata.obs.index = adata.obs['cell_id']
+    he_annotation['Cell_type_HE'] = he_annotation['group']
+    adata.obs = adata.obs.merge(he_annotation['Cell_type_HE'], how='left', left_index=True, right_index=True)
+    adata.obs['Cell_type_HE'] = adata.obs['Cell_type_HE'].astype(str)
+    adata.obs = adata.obs[[cell_subtype, 'Cell_type_ST', 'Cell_type_HE']]
+    adata.write(processed_path + f'annotation/adata_he{crop_size}.h5ad')
 
-he_annotation = pd.read_csv(processed_path + f"annotation/merged_output.csv")
-he_annotation.set_index("cell_id")[["group"]]
-he_annotation.to_csv(processed_path + "annotation/he_annotation.csv", index=False)
-he_annotation["cell_id"] = he_annotation["cell_id"].astype(str)
+    return annotated_cell_ids
 
-he_image = sdata.images["he_image"]["scale0"]
-he_image_array = he_image["image"].values 
-image_channels, image_height, image_width = he_image_array.shape #(c, y, x)
+if 'lung' in args.sample or 'Lung' in args.sample:
+    organ = 'Lung'
+    cell_types = cell_types_lung
 
-annotated_cell_ids = he_annotation["cell_id"].unique()
-filtered_cell_ids = cell_area_filter()
-cell_ids = set(annotated_cell_ids) & set(filtered_cell_ids)
-crop_cells(cell_ids)
+if __name__ == "__main__":
+    raw_path = f"/data0/{args.platform}/{args.sample}/"
+    sdata = prepare_sdata(raw_path)
+    affine = get_transformation(sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
+    cell_boundaries = sdata.shapes["cell_boundaries"]
 
-adata = sdata.tables['table']
-adata = adata[adata.obs['cell_id'].isin(cell_ids), :].copy()
-adata.obs.index = adata.obs['cell_id']
-he_annotation.index = he_annotation['cell_id']
-adata.obs = adata.obs.merge(he_annotation['group'], how='left', left_index=True, right_index=True)
-adata.obs['group'] = adata.obs['group'].astype(str)
-adata.obs = adata.obs[['group']]
-adata.write(processed_path + f'adata_he{crop_size}.h5ad')
+    processed_path = args.directory + f"{args.platform}/{args.sample}/"
+    os.makedirs(processed_path, exist_ok=True)
+
+    he_image = sdata.images["he_image"]["scale0"]
+    he_image_array = he_image["image"].values 
+    image_channels, image_height, image_width = he_image_array.shape #(c, y, x)
+
+    annotated_cell_ids = annotation('cell_type_tumor')
+    filtered_cell_ids = cell_area_filter()
+    cell_ids = set(annotated_cell_ids) & set(filtered_cell_ids)
+    crop_cells(cell_ids)

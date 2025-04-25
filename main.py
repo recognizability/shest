@@ -9,6 +9,7 @@ import torch
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+from preprocess import cell_types_lung
 from utils import PairedDataset
 from model import Reconstruction, Classification
 
@@ -22,48 +23,6 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
-cell_types_cz = {
-    'Tumor_cell_LUAD': [
-        'Tumor cells LUAD',
-        'Tumor cells LUAD EMT',
-        'Tumor cells LUAD MSLN',
-        'Tumor cells LUAD NE',
-        'Tumor cells LUAD mitotic'
-    ],
-    'Stromal_cell': [
-        'stromal dividing',
-        'Fibroblast adventitial',
-        'Fibroblast alveolar',
-        'Fibroblast peribronchial'
-    ],
-    'Pericyte':[
-        'Pericyte',
-    ],
-    'Endothelial_cell': [
-        'Endothelial cell arterial',
-        'Endothelial cell capillary',
-        'Endothelial cell lymphatic',
-        'Endothelial cell venous',
-    ],
-    'Lymphocyte': [
-         'B cell',
-         'B cell dividing',
-         'Plasma cell',
-         'Plasma cell dividing',
-         'T cell regulatory',
-         'T cell CD4',
-         'T cell CD4 dividing',
-         'T cell CD8 activated',
-         'T cell CD8 dividing',
-         'T cell CD8 effector memory',
-         'T cell CD8 naive',
-         'T cell CD8 terminally exhausted',
-         'T cell NK-like',
-         'NK cell',
-         'NK cell dividing'
-    ]
-}
-
 parser = argparse.ArgumentParser(
     description="Sample information and hyperparameters",                             
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -76,19 +35,20 @@ parser.add_argument("--batch_size", type=int, default=128, help="Batch size of d
 parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
 parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
 parser.add_argument("--train_reconstructor", action="store_true", help="If set, retrain the reconstruction model")
-parser.add_argument("--train_classifier", action="store_true", help="If set, retrain the classification model"
-)
+parser.add_argument("--train_classifier", action="store_true", help="If set, retrain the classification model")
 args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+if 'lung' in args.sample or 'Lung' in args.sample:
+    cell_types = cell_types_lung
 '''
 Dataset
 '''
-paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, cell_types_cz)
-adata = paired_dataset.cell_select()
-paired_dataset.draw_umaps_expression()
-palette_he = paired_dataset.palette_he
+paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, cell_types)
+adata = paired_dataset.cell_select(seed)
+#paired_dataset.draw_umaps_expression('cell_type_tumor')
+palette_type = paired_dataset.palette_type
 train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
 
 '''
@@ -97,13 +57,13 @@ Reconstruction
 reconstruction = Reconstruction(seed, adata, args.platform, args.sample, args.he)
 reconstruction.load(train_loader, args.epochs, args.lr, train=args.train_reconstructor)
 reconstruction.evaluate(test_loader)
-#reconstruction.draw_umaps_embedding(palette_he)
-reconstruction.draw_heatmap(cell_types_cz, palette_he)
+reconstruction.draw_umaps_embedding(palette_type)
+reconstruction.draw_heatmap(cell_types, palette_type)
 
 '''
 Classification
 '''
 for cell_type in ['Cell_type', 'Cell_subtype_ST']:
-    classification = Classification(adata, args.platform, args.sample, args.he, cell_types_cz, cell_type)
+    classification = Classification(adata, args.platform, args.sample, args.he, cell_types, cell_type)
     classification.load(train_loader, args.epochs, args.lr, train=args.train_classifier)
     classification.evaluate(test_loader)

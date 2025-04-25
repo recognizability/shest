@@ -1,0 +1,57 @@
+2025-04-24 19:24:19.056050: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-04-24 19:24:19.066458: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:477] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1745490259.079206 4085872 cuda_dnn.cc:8310] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1745490259.082961 4085872 cuda_blas.cc:1418] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+2025-04-24 19:24:19.095724: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 AVX512_FP16 AVX_VNNI AMX_TILE AMX_INT8 AMX_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/sparse_dot_mkl/_mkl_interface/__init__.py:147: RuntimeWarning: MKL_INTERFACE_LAYER value LP64,GNU invalid; set 'ILP64' or 'LP64'
+  _warnings.warn(
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/scanpy/tools/_utils.py:41: UserWarning: You’re trying to run this on 5001 dimensions of `.X`, if you really want this, set `use_rep='X'`.
+         Falling back to preprocessing with `sc.pp.pca` and default params.
+  warnings.warn(
+/home/hoyeon/crp/shest/utils.py:150: FutureWarning: Setting an item of incompatible dtype is deprecated and will raise an error in a future version of pandas. Value '['Lymphocyte', 'Lymphocyte', 'Lymphocyte', 'Lymphocyte', 'Lymphocyte', ..., 'Stromal_cell', 'Stromal_cell', 'Stromal_cell', 'Stromal_cell', 'Lymphocyte']
+Length: 7183
+Categories (5, object): ['Endothelial_cell', 'Lymphocyte', 'Pericyte', 'Stromal_cell', 'Tumor_cell_LUAD']' has dtype incompatible with float64, please explicitly cast to a compatible dtype first.
+  self.adata.obs.loc[condition, 'Cell_type'] = self.adata.obs.loc[condition, 'Cell_type_HE']
+/home/hoyeon/crp/shest/utils.py:167: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  pd.DataFrame(self.adata.obs.groupby(['Cell_subtype_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_subtypes_st).T,
+/home/hoyeon/crp/shest/utils.py:175: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  pd.DataFrame(self.adata.obs.groupby(['Cell_type_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
+/home/hoyeon/crp/shest/utils.py:183: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  pd.DataFrame(self.adata.obs.groupby(['Cell_type_HE']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
+/home/hoyeon/crp/shest/utils.py:191: FutureWarning: The default of observed=False is deprecated and will be changed to True in a future version of pandas. Pass observed=False to retain current behavior or observed=True to adopt the future default and silence this warning.
+  pd.DataFrame(self.adata.obs.groupby(['Cell_type']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
+Expression profile and their cell types loading ... (16890, 5001)
+Annotating types of the cells ... 
+Loading LuCA single cell reference ... (890745, 17811)
+Preprocessing adata ... (16890, 5001)
+Starting preprocessing
+Annotation profiles were not found in `reference.varm["cell_type_tumor"]`. Constructing reference profiles with `tacco.preprocessing.construct_reference_profiles` and default arguments...
+Finished preprocessing in 76.2 seconds.
+Starting annotation of data with shape (16890, 4600) and a reference of shape (890745, 4600) using the following wrapped method:
++- platform normalization: platform_iterations=0, gene_keys=cell_type_tumor, normalize_to=adata
+   +- bisection boost: bisections=4, bisection_divisor=3
+      +- core: method=OT annotation_prior=None
+mean,std( rescaling(gene) )  0.0416306483891502 0.10924994936362498
+bisection run on 1
+bisection run on 0.6666666666666667
+bisection run on 0.4444444444444444
+bisection run on 0.2962962962962963
+bisection run on 0.19753086419753085
+bisection run on 0.09876543209876543
+Finished annotation in 30.45 seconds.
+48 subtypes are annotated.
+Categorize the cell subtypes into cell types ...
+6 types are annotated.
+Common 7183 cells are selected.
+Traceback (most recent call last):
+  File "/home/hoyeon/crp/shest/main.py", line 92, in <module>
+    train_loader, test_loader = paired_dataset.loaders(seed, args.batch_size)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/crp/shest/utils.py", line 206, in loaders
+    train_dataset, test_dataset = random_split(self.dataloader_selected.dataset, [train_size, test_size], generator=generator)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/dataset.py", line 480, in random_split
+    raise ValueError(
+ValueError: Sum of input lengths does not equal the length of the input dataset!

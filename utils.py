@@ -64,62 +64,21 @@ def preprocessing(adata):
 
     return adata
 
-def single_cell_reference(organ):
-    if organ == 'lung':
-        print("Loading LuCA single cell reference ... ", end='')
-        luca = sc.read_h5ad('/data0/cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
-        luca = luca[luca.obs['cell_type_tumor']!='ROS1+ healthy epithelial'].copy()
-        luca.index = luca.var.feature_name
-        luca.var.index = luca.var.feature_name
-        print(luca.shape)
-        return luca
-
-def cell_type_annotation(adata, cell_types, platform, sample, he, cell_subtype='cell_type_tumor'):
-    print('Annotating types of the cells ... ')
-    
-    annotation_file = f"/data0/crp/annotation/cell_subtype_{platform}_{sample}_{he}.h5ad"
-    
-    if not os.path.isfile(annotation_file):
-        if 'Lung' in sample or 'lung' in sample:
-            organ = 'lung'
-        ref = single_cell_reference(organ)
-
-        print('Preprocessing adata ... ', end='')
-        adata = preprocessing(adata)
-        print(adata.shape)
-    
-        adata.obs['Cell_subtype'] = tc.tl.annotate(adata, ref, annotation_key=cell_subtype, assume_valid_counts=True).T.idxmax()
-        adata.obs['Cell_type'] = adata.obs['Cell_subtype'].map({cell: group for group, cells in cell_types.items() for cell in cells}).astype('category')
-
-        adata.write(annotation_file)
-        
-    else:
-        adata = sc.read_h5ad(annotation_file)
-
-    print(len(adata.obs['Cell_subtype'].unique()), 'subtypes are annotated.')
-    
-    print('Categorize the cell subtypes into cell types ...')
-    adata.obs['Cell_subtype_ST'] = adata.obs['Cell_subtype'].map({cell: cell for group, cells in cell_types.items() for cell in cells}).astype('category')
-    adata.obs['Cell_type_ST'] = adata.obs['Cell_subtype'].map({cell: group for group, cells in cell_types.items() for cell in cells}).astype('category')
-    print(len(adata.obs['Cell_type_ST'].unique()), 'types are annotated.')
-
-    return adata
-
 class PairedDataset():
-    def __init__(self, directory, platform, sample, he, cell_types_cz):
+    def __init__(self, directory, platform, sample, he, cell_types):
         self.directory = directory
         self.platform = platform
         self.sample = sample
         self.he = he
-        self.cell_types_cz = cell_types_cz
-        self.palette_he = dict(zip(
-            cell_types_cz.keys(),
-            sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types_cz.keys())).as_hex()
+        self.cell_types = cell_types
+        self.palette_type = dict(zip(
+            self.cell_types.keys(),
+            sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())).as_hex()
         ))
-        self.cell_subtypes_st = sum(cell_types_cz.values(), [])
-        self.palette_st = dict(zip(
-            self.cell_subtypes_st,
-            sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes_st)).as_hex()
+        self.cell_subtypes = sum(cell_types.values(), [])
+        self.palette_subtype = dict(zip(
+            self.cell_subtypes,
+            sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
         cells_path = os.path.join(directory, platform, sample, he, '*')
@@ -131,69 +90,60 @@ class PairedDataset():
         self.common_ids = None
         self.dataloader_selected = None
 
-    def cell_select(self, cell_type_he='group', force=False):
-        annotation_file = f"/data0/crp/annotation/cell_type_{self.platform}_{self.sample}_{self.he}.h5ad"
+    def cell_select(self, seed, force=False):
+        print('Expression profile and their cell types loading ... ', end='')
+        adata_file = f'{self.directory}{self.platform}/{self.sample}/annotation/adata_{self.he}.h5ad'
+        self.adata = sc.read_h5ad(adata_file)
+        print(self.adata.shape)
         
-        if not os.path.isfile(annotation_file) or force:
-            print('Expression profile and their cell types loading ... ', end='')
-            adata_file = os.path.join(self.directory, self.platform, self.sample, f'adata_{self.he}.h5ad')
-            self.adata = sc.read_h5ad(adata_file)
-            self.adata.obs['Cell_type_HE'] = self.adata.obs[cell_type_he]
-            print(self.adata.shape)
-            
-            self.adata = cell_type_annotation(self.adata, cell_types=self.cell_types_cz, platform=self.platform, sample=self.sample, he=self.he)
-            sc.pp.neighbors(self.adata)
-            sc.tl.umap(self.adata)
-        
-            self.adata.obs['Cell_type'] = np.nan
-            condition = self.adata.obs['Cell_type_ST'].astype('str') == self.adata.obs['Cell_type_HE'].astype('str')
-            self.adata.obs.loc[condition, 'Cell_type'] = self.adata.obs.loc[condition, 'Cell_type_HE']
-            self.adata.write(annotation_file)
-            
-        else:
-            self.adata = sc.read_h5ad(annotation_file)
-        
+        self.adata.obs['Cell_type_ST'] = self.adata.obs['Cell_type_ST'].astype(str)
+        self.adata.obs['Cell_type_HE'] = self.adata.obs['Cell_type_HE'].astype(str)
+        self.adata.obs['Cell_type'] = self.adata.obs.loc[self.adata.obs['Cell_type_ST']==self.adata.obs['Cell_type_HE'], 'Cell_type_HE']
         self.common_ids = self.adata[self.adata.obs['Cell_type'].notna(), :].obs.index
         print('Common', len(self.common_ids), "cells are selected.")
+        print('Setting neighbors for each cell ...')
+        sc.pp.neighbors(self.adata, random_state=seed)
+        print('Making UMAPs for each cell ...')
+        sc.tl.umap(self.adata, random_state=seed)
         selected_indices = [self.cell_ids.index(cell_id) for cell_id in self.cell_ids if cell_id in self.common_ids]
         self.dataloader_selected = DataLoader(Subset(self.dataloader.dataset, selected_indices), batch_size=self.dataloader.batch_size, shuffle=False)
 
         return self.adata
 
-    def draw_umaps_expression(self):
-        fig, ax = plt.subplots(4, 2, figsize=(8, 12))
+    def draw_umaps_expression(self, cell_subtype):
+        fig, ax = plt.subplots(3, 2, figsize=(7, 9))
+
+#        sns.barplot(
+#           pd.DataFrame(self.adata.obs.groupby([cell_subtype]).apply(len, include_groups=False), columns=['']).reindex(self.cell_subtypes).T,
+#           orient = 'h',
+#           palette = self.palette_subtype,
+#           ax=ax[0][0]
+#        )
+#        sc.pl.umap(self.adata, color=cell_subtype, palette=self.palette_subtype, ax=ax[0][1], show=False, legend_loc=None)
 
         sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_subtype_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_subtypes_st).T,
+           pd.DataFrame(self.adata.obs.groupby(['Cell_type_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
            orient = 'h',
-           palette = self.palette_st,
+           palette = self.palette_type,
            ax=ax[0][0]
         )
-        sc.pl.umap(self.adata, color='Cell_subtype_ST', palette=self.palette_st, ax=ax[0][1], show=False, legend_loc=None)
+        sc.pl.umap(self.adata, color='Cell_type_ST', palette=self.palette_type, ax=ax[0][1], show=False, legend_loc=None)
 
         sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
+           pd.DataFrame(self.adata.obs.groupby(['Cell_type_HE']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
            orient = 'h',
-           palette = self.palette_he,
+           palette = self.palette_type,
            ax=ax[1][0]
         )
-        sc.pl.umap(self.adata, color='Cell_type_ST', palette=self.palette_he, ax=ax[1][1], show=False, legend_loc=None)
+        sc.pl.umap(self.adata, color='Cell_type_HE', palette=self.palette_type, ax=ax[1][1], show=False, legend_loc=None)
 
         sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type_HE']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
+           pd.DataFrame(self.adata.obs.groupby(['Cell_type']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
            orient = 'h',
-           palette = self.palette_he,
+           palette = self.palette_type,
            ax=ax[2][0]
         )
-        sc.pl.umap(self.adata, color='Cell_type_HE', palette=self.palette_he, ax=ax[2][1], show=False, legend_loc=None)
-
-        sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types_cz.keys()).T,
-           orient = 'h',
-           palette = self.palette_he,
-           ax=ax[3][0]
-        )
-        sc.pl.umap(self.adata, color='Cell_type', palette=self.palette_he, ax=ax[3][1], show=False, legend_loc=None)
+        sc.pl.umap(self.adata, color='Cell_type', palette=self.palette_type, ax=ax[2][1], show=False, legend_loc=None)
 
         fig.tight_layout()
         fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")

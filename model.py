@@ -235,7 +235,7 @@ class Reconstruction():
         fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
-    def draw_heatmap(self, cell_types_cz, palette_he):
+    def draw_heatmap(self, cell_types, palette_he):
         group='Cell_type'
         adata_actual = anndata.AnnData(
             X = self.expressions,
@@ -270,7 +270,7 @@ class Reconstruction():
         cell_types_cutoff = adata_actual.obs[group].value_counts()
         cell_types_cutoff = cell_types_cutoff[cell_types_cutoff > 3]
         cell_types_cutoff = cell_types_cutoff.index.tolist()
-        cell_types_cutoff = [cell_type for cell_type in cell_types_cz.keys() if cell_type in cell_types_cutoff]
+        cell_types_cutoff = [cell_type for cell_type in cell_types.keys() if cell_type in cell_types_cutoff]
         
         top_markers = []
         for cell_type in cell_types_cutoff:
@@ -303,7 +303,7 @@ class Classifier(nn.Module):
                 module.reset_parameters()
 
 class Classification():
-    def __init__(self, adata, platform, sample, he, cell_types_cz, cell_type):
+    def __init__(self, adata, platform, sample, he, cell_types, cell_type):
         self.platform = platform
         self.sample = sample
         self.he = he
@@ -318,17 +318,16 @@ class Classification():
         self.cell_type = cell_type
         self.cell_type_encoded = self.cell_type + '_encoded'
 
-        self.cell_types_cz = cell_types_cz
+        self.cell_types = cell_types
         self.label_encoder = LabelEncoder()
         if self.cell_type == 'Cell_type':
-            self.parameters = list(self.cell_types_cz.keys())
+            self.parameters = list(self.cell_types.keys())
         elif self.cell_type == 'Cell_subtype_ST' or self.cell_type == 'Cell_subtype':
-            self.parameters =  sum(self.cell_types_cz.values(), [])
+            self.parameters =  sum(self.cell_types.values(), [])
         self.label_encoder.fit(self.parameters)
     
         self.adata = adata
         self.adata_local = self.adata[self.adata.obs[self.cell_type].notna(), :].copy()
-        #self.adata_local = self.adata[~self.adata.obs[self.cell_type].isna(), :].copy()
         self.adata_local.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata_local.obs[self.cell_type])
 
         self.classifier = Classifier(num_classes=len(self.parameters))
