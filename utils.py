@@ -24,7 +24,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from config import seed, n_cores
+from config import n_cores, seed, set_seed
 
 sc.settings.n_jobs = n_cores
 
@@ -77,9 +77,6 @@ class PairedDataset():
         self.sample = sample
         self.he = he
         self.cell_types = cell_types
-#        type_colors = sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())-1).as_hex()
-#        type_colors.append('#000000')
-#        self.palette_type = dict(zip(self.cell_types.keys(), type_colors))
         self.palette_type = dict(zip(
             self.cell_types.keys(), 
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())).as_hex()
@@ -143,12 +140,18 @@ class PairedDataset():
         plt.close()
 
     def loaders(self, batch_size):
+        angles = [
+            0,
+#            90,
+#            180,
+#            270,
+        ]
+        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, angles=angles)
         train_size = int(0.8 * len(self.common_ids))
         test_size = len(self.common_ids) - train_size
         generator = torch.Generator().manual_seed(seed)
-        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, angles=[0, 90, 180, 270])
-        train_dataset, test_dataset = random_split(full_dataset, [train_size*4, test_size*4], generator=generator)
-        print(f'The size of the train set is {len(train_dataset)}, and the size of the test set is {len(test_dataset)}.')
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_cores, pin_memory=True)
+        train_dataset, test_dataset = random_split(full_dataset, [train_size*len(angles), test_size*len(angles)], generator=generator)
+        print(f'The training dataset size is {len(train_dataset)}, and the test dataset size is {len(test_dataset)}.')
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_cores, pin_memory=True, generator=generator)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True) 
         return train_loader, test_loader

@@ -20,15 +20,29 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, f1_score
 
-from config import seed
+from config import seed, set_seed
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-in_features = 768 # ViT output features
+#in_features = 2048 #output features of ResNet
+in_features = 768 #output features of ViT or SwinTransformer
+
+#class Encoder(nn.Module):
+#    def __init__(self, backbone="resnet50"):
+#        super().__init__()
+#        base_model = getattr(models, backbone)(weights="IMAGENET1K_V1")
+#        self.encoder = nn.Sequential(*list(base_model.children())[:-1]) # Remove avgpool & fc
+#        self.flatten = nn.Flatten()
+#
+#    def forward(self, x):
+#        x = self.encoder(x)
+#        x = self.flatten(x)
+#        return x
 
 class Encoder(nn.Module):
-    def __init__(self, backbone="vit_b_16", pretrained=True):
+    def __init__(self, backbone="vit_b_16"):
         super().__init__()
-        self.encoder = getattr(models, backbone)(pretrained=pretrained)
+        torch.manual_seed(seed)
+        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
 
     def forward(self, x):
         x = self.encoder._process_input(x)
@@ -38,9 +52,24 @@ class Encoder(nn.Module):
         x = x[:, 0] #CLS token
         return x
 
+#class Encoder(nn.Module):
+#    def __init__(self, backbone="swin_v2_s", pretrained=True):
+#        super().__init__()
+#        torch.manual_seed(seed)
+#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
+#
+#    def forward(self, x):
+#        x = self.encoder.features(x)
+#        x = self.encoder.norm(x)
+#        x = self.encoder.permute(x)
+#        x = self.encoder.avgpool(x)
+#        x = self.encoder.flatten(x)
+#        return x
+
 class Decoder(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
+        torch.manual_seed(seed)
         self.fc1 = nn.Linear(in_features, 2048)
         self.bn1 = nn.BatchNorm1d(2048)
         self.fc2 = nn.Linear(2048, 2048)
@@ -60,13 +89,8 @@ class Decoder(nn.Module):
 
     def reset_parameters(self):
         for module in self.modules():
-            if isinstance(module, nn.Linear):
+            if isinstance(module, (nn.Linear, nn.BatchNorm1d)):
                 module.reset_parameters()
-            elif isinstance(module, nn.BatchNorm1d):
-                module.reset_running_stats()
-                if module.affine:
-                    nn.init.ones_(module.weight)
-                    nn.init.zeros_(module.bias)
 
 class Reconstructor(nn.Module):
     def __init__(self, out_features):
@@ -82,7 +106,6 @@ class Reconstructor(nn.Module):
 
 class Reconstruction():
     def __init__(self, adata, platform, sample, he):
-        
         self.adata = adata
         self.reconstructor = Reconstructor(out_features=adata.shape[1])
 
@@ -129,7 +152,7 @@ class Reconstruction():
                     
                     train_loss += loss.item()
                     
-                print(f"Epoch {epoch+1}/{epochs}, Loss: {train_loss / len(train_loader):.4f}")
+                print(f"Epoch {epoch+1}/{epochs}, Loss: {train_loss / len(train_loader):.5f}")
             
             gc.collect()
             torch.cuda.empty_cache()
@@ -176,7 +199,7 @@ class Reconstruction():
                 loss = self.criterion(reconstruction, expression)
                 test_loss += loss.item()
                 
-        print(f"Test Loss: {test_loss / len(test_loader):.4f}")
+        print(f"Test Loss: {test_loss / len(test_loader):.5f}")
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -193,7 +216,7 @@ class Reconstruction():
         self.cell_labels = cell_labels
         
     def _apply_umap(self, data):
-        reducer = UMAP(n_components=2, n_jobs=-1, low_memory=True)
+        reducer = UMAP(n_components=2, n_jobs=-1, low_memory=True, random_state=seed)
         return reducer.fit_transform(data)
 
     def draw_umaps_embedding(self, palette_he):
@@ -252,13 +275,13 @@ class Reconstruction():
         
         sc.pp.normalize_total(adata_actual, target_sum=1e4)
         sc.pp.log1p(adata_actual)
-        sc.pp.neighbors(adata_actual)
+        sc.pp.neighbors(adata_actual, random_state=seed)
         sc.tl.umap(adata_actual, random_state=seed)
         sc.pl.umap(adata_actual, color=group, palette=palette_he, show=False, ax=ax[0], legend_loc=None, use_raw=False)
         
         sc.pp.normalize_total(adata_reconstruction, target_sum=1e4)
         sc.pp.log1p(adata_reconstruction)
-        sc.pp.neighbors(adata_reconstruction)
+        sc.pp.neighbors(adata_reconstruction, random_state=seed)
         sc.tl.umap(adata_reconstruction, random_state=seed)
         sc.pl.umap(adata_reconstruction, color=group, palette=palette_he, show=False, ax=ax[1], use_raw=False)
         
@@ -290,6 +313,7 @@ class Reconstruction():
 
 class Classifier(nn.Module):
     def __init__(self, num_classes, input_dim=in_features):
+        torch.manual_seed(seed)
         super().__init__()
         self.fc = nn.Linear(input_dim, num_classes)
         self.reset_parameters()
@@ -366,7 +390,7 @@ class Classification():
             
                     train_loss += loss.item()
             
-                print(f"Epoch: {epoch+1}/{epochs}, Loss: {train_loss / len(train_loader):.5f}")
+                print(f"Epoch: {epoch+1}/{epochs}, Loss: {train_loss / len(train_loader):.4f}")
                     
             gc.collect()
             torch.cuda.empty_cache()

@@ -19,7 +19,7 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from config import n_cores, seed, cell_types_lung
+from config import n_cores, seed, set_seed, cell_types_lung
 
 sc.settings.n_jobs = n_cores
 
@@ -69,7 +69,7 @@ def crop_he_image(cell_id):
     os.makedirs(image_path, exist_ok=True)
     if 0 <= x_min and x_max < image_width and 0 <= y_min and y_max < image_height:
         cropped_image = he_image_array[:, y_min:y_max, x_min:x_max]
-        cropped_image = np.transpose(cropped_image, (1, 2, 0)) # (c, y, x) to (y, x, c)
+        cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
         cropped_image = Image.fromarray(cropped_image)
         cropped_image.save(image_path + f"{cell_id}.png")
     

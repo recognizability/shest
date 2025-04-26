@@ -1,7 +1,26 @@
+import os
+import random
+import numpy as np
+import torch
 import multiprocessing as mp
 
-seed = 42
 n_cores = max(mp.cpu_count()-2, 1)
+seed = 42
+
+def set_seed(seed=seed):
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    torch.use_deterministic_algorithms(True)
+
 
 cell_types_lung = {
     'Tumor_cell_LUAD': [

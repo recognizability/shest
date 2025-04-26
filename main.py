@@ -4,24 +4,14 @@ import argparse
 from tqdm import tqdm
 
 import numpy as np
-import torch
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from config import seed
+from config import seed, set_seed
 from preprocess import cell_types_lung
 from utils import PairedDataset
 from model import Reconstruction, Classification
-
-os.environ['PYTHONHASHSEED'] = str(seed)
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -33,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
     parser.add_argument("--he", type=str, default="he70", help="H&E images with side length")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs in training")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
     parser.add_argument("--lr", type=int, default=0.01, help="Learning rate of optimizer")
     parser.add_argument("--train_reconstructor", action="store_true", help="If set, retrain the reconstruction model")
     parser.add_argument("--train_classifier", action="store_true", help="If set, retrain the classification model")
