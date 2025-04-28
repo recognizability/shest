@@ -10,8 +10,10 @@ from spatialdata.transformations import get_transformation
 import spatialdata_plot
 from spatialdata_io import xenium
 
-from multiprocessing import Pool
 from tqdm import tqdm
+#from multiprocessing import Pool
+#from joblib import Parallel, delayed
+from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -68,7 +70,7 @@ class Preprocess():
             print('done.')
         return sdata
 
-    def single_cell_reference():
+    def _single_cell_reference(self):
         if self.organ == 'Lung':
             print("Loading LuCA single cell reference ... ", end='')
             ref = sc.read_h5ad('/data0/cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
@@ -89,7 +91,7 @@ class Preprocess():
         sc_annotation_csv = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.csv'
         sc_annotation_h5ad = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.h5ad'
         if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)) or args.force_annotate:
-            ref = single_cell_reference()
+            ref = self._single_cell_reference()
             print('Annotating types of the cells ... ')
             self.adata.obs[cell_subtype] = tc.tl.annotate(
                 self.adata,
@@ -124,7 +126,7 @@ class Preprocess():
             else:
                 self.adata = sc.read_h5ad(adata_file)
 
-    def inverse_affine_transform(self, x_pixel, y_pixel):
+    def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)
         y_pixel = np.atleast_1d(y_pixel)
         pixel_coords = np.stack([x_pixel, y_pixel], axis=1)
@@ -139,10 +141,10 @@ class Preprocess():
             return x_transformed, y_transformed
 
     def _crop_he_image(self, cell_id):
-        centroid = self.cell_boundaries.centroid
+        centroid = self.cell_boundaries.loc[cell_id, "geometry"].centroid
         xenium_x_um, xenium_y_um = centroid.x, centroid.y
         xenium_x_px, xenium_y_px = xenium_x_um / self.pixel_size, xenium_y_um / self.pixel_size
-        he_x, he_y = inverse_affine_transform(xenium_x_px, xenium_y_px)
+        he_x, he_y = self._inverse_affine_transform(xenium_x_px, xenium_y_px)
         he_x, he_y = round(he_x), round(he_y)
         half = self.crop_size // 2
         x_min = int(he_x - half)
@@ -185,10 +187,8 @@ class Preprocess():
     def crop_cells(self):
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
         print(f'{len(self.cell_ids)} cells are prepared for model')
-        pool = Pool(n_cores)
-        expression_dfs = pool.map(self._crop_he_image, tqdm(self.cell_ids))
-        pool.close()
-        pool.join()
+        with ThreadPoolExecutor(max_workers=n_cores) as executor:
+            executor.map(self._crop_he_image, tqdm(self.cell_ids), chunksize=len(self.cell_ids)//n_cores)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
