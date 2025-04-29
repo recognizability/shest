@@ -11,8 +11,6 @@ import spatialdata_plot
 from spatialdata_io import xenium
 
 from tqdm import tqdm
-#from multiprocessing import Pool
-#from joblib import Parallel, delayed
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
@@ -188,7 +186,7 @@ class Preprocess():
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
         print(f'{len(self.cell_ids)} cells are prepared for model')
         with ThreadPoolExecutor(max_workers=n_cores) as executor:
-            executor.map(self._crop_he_image, tqdm(self.cell_ids), chunksize=len(self.cell_ids)//n_cores)
+            list(tqdm(executor.map(self._crop_he_image, self.cell_ids, chunksize=len(self.cell_ids)//n_cores), total=len(self.cell_ids)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

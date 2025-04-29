@@ -6,6 +6,7 @@ import multiprocessing as mp
 
 n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
+generator = torch.Generator().manual_seed(seed)
 
 def set_seed(seed=seed):
     os.environ['PYTHONHASHSEED'] = str(seed)

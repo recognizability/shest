@@ -20,28 +20,14 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, f1_score
 
-from config import seed, set_seed
+from config import seed, set_seed, generator
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#in_features = 2048 #output features of ResNet
 in_features = 768 #output features of ViT or SwinTransformer
-
-#class Encoder(nn.Module):
-#    def __init__(self, backbone="resnet50"):
-#        super().__init__()
-#        base_model = getattr(models, backbone)(weights="IMAGENET1K_V1")
-#        self.encoder = nn.Sequential(*list(base_model.children())[:-1]) # Remove avgpool & fc
-#        self.flatten = nn.Flatten()
-#
-#    def forward(self, x):
-#        x = self.encoder(x)
-#        x = self.flatten(x)
-#        return x
 
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16"):
         super().__init__()
-        torch.manual_seed(seed)
         self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
 
     def forward(self, x):
@@ -52,45 +38,36 @@ class Encoder(nn.Module):
         x = x[:, 0] #CLS token
         return x
 
-#class Encoder(nn.Module):
-#    def __init__(self, backbone="swin_v2_s", pretrained=True):
-#        super().__init__()
-#        torch.manual_seed(seed)
-#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
-#
-#    def forward(self, x):
-#        x = self.encoder.features(x)
-#        x = self.encoder.norm(x)
-#        x = self.encoder.permute(x)
-#        x = self.encoder.avgpool(x)
-#        x = self.encoder.flatten(x)
-#        return x
-
 class Decoder(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        torch.manual_seed(seed)
         self.fc1 = nn.Linear(in_features, 2048)
+#        self.bn1 = nn.BatchNorm1d(2048, affine=False, track_running_stats=False)
         self.bn1 = nn.BatchNorm1d(2048)
         self.fc2 = nn.Linear(2048, 2048)
+#        self.bn2 = nn.BatchNorm1d(2048, affine=False, track_running_stats=False)
         self.bn2 = nn.BatchNorm1d(2048)
         self.fc3 = nn.Linear(2048, out_features)
-        self.dropout = nn.Dropout(0.3)
 
         self.reset_parameters()
 
     def forward(self, x):
         x = F.relu(self.bn1(self.fc1(x)))
-        x = self.dropout(x)
         x = F.relu(self.bn2(self.fc2(x)))
-        x = self.dropout(x)
         x = F.relu(self.fc3(x))
         return x
 
     def reset_parameters(self):
         for module in self.modules():
-            if isinstance(module, (nn.Linear, nn.BatchNorm1d)):
-                module.reset_parameters()
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_uniform_(module.weight, nonlinearity='relu', generator=generator)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.BatchNorm1d):
+                if module.weight is not None:
+                    nn.init.ones_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
 class Reconstructor(nn.Module):
     def __init__(self, out_features):
@@ -142,8 +119,8 @@ class Reconstruction():
                         self.adata[cell_id, :].X.toarray(), dtype=torch.float32, device=device
                     )
                     
-                    reconstruction = self.reconstructor(image)
-                    reconstruction = reconstruction.to(device)
+                    embedding = self.reconstructor.encoder(image)
+                    reconstruction = self.reconstructor.decoder(embedding)
 
                     optimizer.zero_grad()
                     loss = self.criterion(reconstruction, expression)
@@ -191,7 +168,6 @@ class Reconstruction():
                 embeddings.append(embedding)
 
                 reconstruction = self.reconstructor(image)
-                reconstruction = reconstruction.to(device)
                 reconstructions.append(reconstruction)
 
                 cell_labels.extend(self.adata[cell_id, :].obs['Cell_type'].values.tolist())
@@ -313,7 +289,6 @@ class Reconstruction():
 
 class Classifier(nn.Module):
     def __init__(self, num_classes, input_dim=in_features):
-        torch.manual_seed(seed)
         super().__init__()
         self.fc = nn.Linear(input_dim, num_classes)
         self.reset_parameters()
@@ -324,7 +299,9 @@ class Classifier(nn.Module):
     def reset_parameters(self):
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                module.reset_parameters()
+                nn.init.kaiming_uniform_(module.weight, nonlinearity='linear', generator=generator)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
 class Classification():
     def __init__(self, adata, platform, sample, he, cell_types, cell_type):

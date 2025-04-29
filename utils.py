@@ -24,7 +24,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from config import n_cores, seed, set_seed
+from config import n_cores, seed, set_seed, generator
 
 sc.settings.n_jobs = n_cores
 
@@ -149,9 +149,8 @@ class PairedDataset():
         full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, angles=angles)
         train_size = int(0.8 * len(self.common_ids))
         test_size = len(self.common_ids) - train_size
-        generator = torch.Generator().manual_seed(seed)
         train_dataset, test_dataset = random_split(full_dataset, [train_size*len(angles), test_size*len(angles)], generator=generator)
         print(f'The training dataset size is {len(train_dataset)}, and the test dataset size is {len(test_dataset)}.')
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=n_cores, pin_memory=True, generator=generator)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True) 
         return train_loader, test_loader
