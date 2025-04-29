@@ -48,8 +48,6 @@ class Decoder(nn.Module):
         self.bn1 = nn.BatchNorm1d(self.hidden)
         self.fc2 = nn.Linear(self.hidden, self.hidden)
         self.bn2 = nn.BatchNorm1d(self.hidden)
-#        self.fc_mu = nn.Linear(self.hidden, out_features)
-#        self.fc_alpha = nn.Linear(self.hidden, out_features)
         self.fc3 = nn.Linear(self.hidden, out_features)
 
         self.reset_parameters()
@@ -57,9 +55,6 @@ class Decoder(nn.Module):
     def forward(self, x):
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.fc2(x)))        
-#        mu = F.softplus(self.fc_mu(x)) + 1e-4
-#        alpha = F.softplus(self.fc_alpha(x)) + 1e-4
-#        return mu, alpha
         x = F.relu(self.fc3(x))
         return x
 
@@ -87,21 +82,6 @@ class Reconstructor(nn.Module):
         x = self.decoder(x)
         return x
 
-#class NegativeBinomialLoss(nn.Module):
-#    def __init__(self, eps=1e-8):
-#        super().__init__()
-#        self.eps = eps
-#
-#    def forward(self, mu, alpha, target):
-#        mu = torch.clamp(mu, min=self.eps)
-#        alpha = torch.clamp(alpha, min=self.eps)
-#        target = target.float()
-#        total_count = 1.0 / alpha
-#        logits = (mu + self.eps).log() - (total_count + mu + self.eps).log()
-#        nb = NegativeBinomial(total_count=total_count, logits=logits)
-#        loss = -nb.log_prob(target)
-#        return loss.mean()
-
 class Reconstruction():
     def __init__(self, adata, platform, sample, he, cell_type):
         self.adata = adata
@@ -119,7 +99,6 @@ class Reconstruction():
         self.reconstructions = None
         self.cell_labels = None
 
-#        self.criterion = NegativeBinomialLoss()
         self.criterion = nn.HuberLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
@@ -146,11 +125,9 @@ class Reconstruction():
                     if torch.isnan(embedding).any():
                         print("NaN in embedding")
                         sys.exit()
-#                    mu, alpha = self.reconstructor.decoder(embedding)
                     reconstruction = self.reconstructor.decoder(embedding)
 
                     optimizer.zero_grad()
-#                    loss = self.criterion(mu, alpha, expression)
                     loss = self.criterion(reconstruction, expression)
                     loss.backward()
                     optimizer.step()
@@ -195,14 +172,11 @@ class Reconstruction():
                 embedding = self.reconstructor.encoder(image)
                 embeddings.append(embedding)
 
-#                mu, alpha = self.reconstructor.decoder(embedding)
-#                reconstructions.append(mu)
                 reconstruction = self.reconstructor.decoder(embedding)
                 reconstructions.append(reconstruction)
 
                 cell_labels.extend(self.adata[cell_id, :].obs['Cell_type'].values.tolist())
 
-#                loss = self.criterion(mu, alpha, expression)
                 loss = self.criterion(reconstruction, expression)
                 test_loss += loss.item()
                 

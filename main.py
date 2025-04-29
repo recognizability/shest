@@ -38,8 +38,8 @@ if __name__ == "__main__":
     adata = paired_dataset.cell_select()
     paired_dataset.draw_umaps_expression()
     palette_type = paired_dataset.palette_type
-    angles = [0]
-#    angles = [0, 90, 180, 270]
+#    angles = [0]
+    angles = [0, 90, 180, 270]
     train_loader, test_loader = paired_dataset.loaders(args.batch_size, angles)
 
     reconstruction = Reconstruction(adata, args.platform, args.sample, args.he, args.cell_type)
