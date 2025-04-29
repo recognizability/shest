@@ -1,4 +1,5 @@
 import os
+import sys
 import gc
 from tqdm import tqdm
 
@@ -9,6 +10,7 @@ import scanpy as sc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import NegativeBinomial
 import torchvision.models as models
 
 from umap import UMAP
@@ -41,19 +43,23 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        self.fc1 = nn.Linear(in_features, 2048)
-#        self.bn1 = nn.BatchNorm1d(2048, affine=False, track_running_stats=False)
-        self.bn1 = nn.BatchNorm1d(2048)
-        self.fc2 = nn.Linear(2048, 2048)
-#        self.bn2 = nn.BatchNorm1d(2048, affine=False, track_running_stats=False)
-        self.bn2 = nn.BatchNorm1d(2048)
-        self.fc3 = nn.Linear(2048, out_features)
+        self.hidden = 2048
+        self.fc1 = nn.Linear(in_features, self.hidden)
+        self.bn1 = nn.BatchNorm1d(self.hidden)
+        self.fc2 = nn.Linear(self.hidden, self.hidden)
+        self.bn2 = nn.BatchNorm1d(self.hidden)
+#        self.fc_mu = nn.Linear(self.hidden, out_features)
+#        self.fc_alpha = nn.Linear(self.hidden, out_features)
+        self.fc3 = nn.Linear(self.hidden, out_features)
 
         self.reset_parameters()
 
     def forward(self, x):
         x = F.relu(self.bn1(self.fc1(x)))
-        x = F.relu(self.bn2(self.fc2(x)))
+        x = F.relu(self.bn2(self.fc2(x)))        
+#        mu = F.softplus(self.fc_mu(x)) + 1e-4
+#        alpha = F.softplus(self.fc_alpha(x)) + 1e-4
+#        return mu, alpha
         x = F.relu(self.fc3(x))
         return x
 
@@ -79,17 +85,33 @@ class Reconstructor(nn.Module):
     def forward(self, x):
         x = self.encoder(x)
         x = self.decoder(x)
-        return x.squeeze(1)
+        return x
+
+#class NegativeBinomialLoss(nn.Module):
+#    def __init__(self, eps=1e-8):
+#        super().__init__()
+#        self.eps = eps
+#
+#    def forward(self, mu, alpha, target):
+#        mu = torch.clamp(mu, min=self.eps)
+#        alpha = torch.clamp(alpha, min=self.eps)
+#        target = target.float()
+#        total_count = 1.0 / alpha
+#        logits = (mu + self.eps).log() - (total_count + mu + self.eps).log()
+#        nb = NegativeBinomial(total_count=total_count, logits=logits)
+#        loss = -nb.log_prob(target)
+#        return loss.mean()
 
 class Reconstruction():
-    def __init__(self, adata, platform, sample, he):
+    def __init__(self, adata, platform, sample, he, cell_type):
         self.adata = adata
         self.reconstructor = Reconstructor(out_features=adata.shape[1])
 
         self.platform = platform
         self.sample = sample
         self.he = he
-        
+        self.cell_type = cell_type
+
         self.images = None
         self.cell_labels = None
         self.expressions = None
@@ -97,10 +119,11 @@ class Reconstruction():
         self.reconstructions = None
         self.cell_labels = None
 
+#        self.criterion = NegativeBinomialLoss()
         self.criterion = nn.HuberLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}.pth"
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.pth"
         if not os.path.isfile(reconstructor_file) or train:
             self.reconstructor.to(device)
             
@@ -120,9 +143,14 @@ class Reconstruction():
                     )
                     
                     embedding = self.reconstructor.encoder(image)
+                    if torch.isnan(embedding).any():
+                        print("NaN in embedding")
+                        sys.exit()
+#                    mu, alpha = self.reconstructor.decoder(embedding)
                     reconstruction = self.reconstructor.decoder(embedding)
 
                     optimizer.zero_grad()
+#                    loss = self.criterion(mu, alpha, expression)
                     loss = self.criterion(reconstruction, expression)
                     loss.backward()
                     optimizer.step()
@@ -167,11 +195,14 @@ class Reconstruction():
                 embedding = self.reconstructor.encoder(image)
                 embeddings.append(embedding)
 
-                reconstruction = self.reconstructor(image)
+#                mu, alpha = self.reconstructor.decoder(embedding)
+#                reconstructions.append(mu)
+                reconstruction = self.reconstructor.decoder(embedding)
                 reconstructions.append(reconstruction)
 
                 cell_labels.extend(self.adata[cell_id, :].obs['Cell_type'].values.tolist())
 
+#                loss = self.criterion(mu, alpha, expression)
                 loss = self.criterion(reconstruction, expression)
                 test_loss += loss.item()
                 
@@ -231,7 +262,7 @@ class Reconstruction():
         plt.legend(markers, palette_he.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self, cell_types, palette_he):
@@ -278,13 +309,13 @@ class Reconstruction():
         
         sc.tl.dendrogram(adata_actual, groupby=group)
         sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f'/data0/crp/results/expression_actual_{self.platform}_{self.sample}_{self.he}.png')
+        plt.savefig(f'/data0/crp/results/expression_actual_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.png')
         plt.close()
         
         sc.tl.dendrogram(adata_reconstruction, groupby=group)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=group)
         sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f'/data0/crp/results/expression_reconstruction_{self.platform}_{self.sample}_{self.he}.png')
+        plt.savefig(f'/data0/crp/results/expression_reconstruction_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.png')
         plt.close()
 
 class Classifier(nn.Module):
@@ -304,21 +335,20 @@ class Classifier(nn.Module):
                     nn.init.zeros_(module.bias)
 
 class Classification():
-    def __init__(self, adata, platform, sample, he, cell_types, cell_type):
+    def __init__(self, adata, platform, sample, he, cell_type, cell_types):
         self.platform = platform
         self.sample = sample
         self.he = he
+        self.cell_type = cell_type
+        self.cell_type_encoded = self.cell_type + '_encoded'
 
         self.reconstructor = Reconstructor(out_features=adata.shape[1])
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}.pth"
+        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}_{self.cell_type}.pth"
         self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
         self.reconstructor.to(device)
         self.reconstructor.eval()
         self.encoder = self.reconstructor.encoder
         
-        self.cell_type = cell_type
-        self.cell_type_encoded = self.cell_type + '_encoded'
-
         self.cell_types = cell_types
         self.label_encoder = LabelEncoder()
         if self.cell_type == 'Cell_type':

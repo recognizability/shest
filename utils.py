@@ -30,16 +30,18 @@ sc.settings.n_jobs = n_cores
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
-    transforms.ToTensor()
+    transforms.ToTensor(),
+#    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 ])
 
 class HEDataset(Dataset):
-    def __init__(self, cell_ids, directory, platform, sample, he, angles=[0]):
+    def __init__(self, cell_ids, directory, platform, sample, he, cell_type, angles):
         self.cell_ids = cell_ids
         self.directory = directory
         self.platform = platform
         self.sample = sample
         self.he = he
+        self.cell_type = cell_type
         self.angles = angles
 
     def __len__(self):
@@ -52,7 +54,7 @@ class HEDataset(Dataset):
         cell_id = self.cell_ids[base_i]
         angle = self.angles[angle_i]
 
-        image_path = os.path.join(self.directory, self.platform, self.sample, self.he, f'{cell_id}.png')
+        image_path = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type, f'{cell_id}.png')
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image)
@@ -71,11 +73,12 @@ def preprocessing(adata):
     return adata
 
 class PairedDataset():
-    def __init__(self, directory, platform, sample, he, cell_types):
+    def __init__(self, directory, platform, sample, he, cell_type, cell_types):
         self.directory = directory
         self.platform = platform
         self.sample = sample
         self.he = he
+        self.cell_type = cell_type
         self.cell_types = cell_types
         self.palette_type = dict(zip(
             self.cell_types.keys(), 
@@ -87,8 +90,9 @@ class PairedDataset():
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
-        cells_path = os.path.join(directory, platform, sample, he, '*.png')
+        cells_path = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type, '*.png')
         self.image_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
+        print(len(self.image_ids), "images of the cells are prepared.")
         self.dataloader = None
 
         self.adata = None
@@ -101,7 +105,9 @@ class PairedDataset():
         self.adata = sc.read_h5ad(adata_file)
         print(self.adata.shape)
         
-        self.type_ids = self.adata[self.adata.obs['Cell_type'].notna(), :].obs.index
+        self.type_ids = self.adata[self.adata.obs[self.cell_type].notna(), :].obs.index
+        print(len(self.type_ids), "of annotated cells are loaded.")
+        print(self.adata.obs[self.cell_type].value_counts())
         self.common_ids = list(set(self.image_ids) & set(self.type_ids))
         self.common_ids.sort()
         print('Common', len(self.common_ids), "cells are selected.")
@@ -139,14 +145,8 @@ class PairedDataset():
         fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
-    def loaders(self, batch_size):
-        angles = [
-            0,
-#            90,
-#            180,
-#            270,
-        ]
-        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, angles=angles)
+    def loaders(self, batch_size, angles):
+        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, self.cell_type, angles=angles)
         train_size = int(0.8 * len(self.common_ids))
         test_size = len(self.common_ids) - train_size
         train_dataset, test_dataset = random_split(full_dataset, [train_size*len(angles), test_size*len(angles)], generator=generator)

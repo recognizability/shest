@@ -48,6 +48,8 @@ class Preprocess():
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape #(c, y, x)
 
+        self.use_type = None
+        self.image_path = None
         self.annotated_cell_ids = None
         self.filtered_cell_ids = None
         self.cell_ids = None
@@ -78,13 +80,12 @@ class Preprocess():
             print(ref.shape)
         return ref
 
-    def annotation(self, cell_subtype='cell_type_tumor'):
+    def annotation(self, cell_subtype='cell_type_tumor', use_type='Cell_type'):
         he_annotation = pd.read_csv(self.processed_path + f"annotation/merged_output.csv")
         he_annotation = he_annotation.set_index("cell_id")[["group"]]
         he_annotation.to_csv(self.processed_path + "annotation/he_annotation.csv")
         he_annotation['Cell_type_HE'] = he_annotation['group'].astype(str)
-        self.annotated_cell_ids = he_annotation.index
-        print(f"{len(self.annotated_cell_ids)} cells are annotated.")
+        print(f"{he_annotation.shape[0]} cells are annotated by thier morphologies.")
         
         sc_annotation_csv = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.csv'
         sc_annotation_h5ad = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.h5ad'
@@ -119,10 +120,17 @@ class Preprocess():
                 self.adata.obs['Cell_type_HE'] = self.adata.obs['Cell_type_HE']#.fillna('Other')
                 self.adata.obs['Cell_type'] = self.adata.obs.loc[self.adata.obs['Cell_type_ST'].astype(str) == self.adata.obs['Cell_type_HE'].astype(str), 'Cell_type_HE']
                 self.adata.obs = self.adata.obs[['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type']]
+                self.adata.raw = self.adata
+#                sc.pp.normalize_total(self.adata, target_sum=1e4)
+#                sc.pp.log1p(self.adata)
 
                 self.adata.write(adata_file)
             else:
                 self.adata = sc.read_h5ad(adata_file)
+
+        self.use_type = use_type
+        self.annotated_cell_ids = self.adata.obs[self.adata.obs[self.use_type].notna()].index
+        print(f'{len(self.annotated_cell_ids)} cells are used to make their H&E images')
 
     def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)
@@ -150,13 +158,11 @@ class Preprocess():
         y_min = int(he_y - half)
         y_max = int(he_y + half)
 
-        image_path = self.processed_path + f'he{self.crop_size}/'
-        os.makedirs(image_path, exist_ok=True)
         if 0 <= x_min and x_max < self.image_width and 0 <= y_min and y_max < self.image_height:
             cropped_image = self.he_image_array[:, y_min:y_max, x_min:x_max]
             cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
             cropped_image = Image.fromarray(cropped_image)
-            cropped_image.save(image_path + f"{cell_id}.png")
+            cropped_image.save(self.image_path + f"{cell_id}.png")
         
     def cell_area_filter(self):
         bounds = self.cell_boundaries.bounds
@@ -183,8 +189,10 @@ class Preprocess():
         print(f"{len(self.filtered_cell_ids)} cells are selected from {len_raw} cells.")
 
     def crop_cells(self):
+        self.image_path = self.processed_path + f'he{self.crop_size}/{self.use_type}/'
+        os.makedirs(self.image_path, exist_ok=True)
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
-        print(f'{len(self.cell_ids)} cells are prepared for model')
+        print(f'{len(self.cell_ids)} cells are been preparing in {self.image_path} directory for modeling')
         with ThreadPoolExecutor(max_workers=n_cores) as executor:
             list(tqdm(executor.map(self._crop_he_image, self.cell_ids, chunksize=len(self.cell_ids)//n_cores), total=len(self.cell_ids)))
 
@@ -196,11 +204,12 @@ if __name__ == "__main__":
     parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
-    parser.add_argument("--force_annotate", action="store_true", help="If set, annotate again")
-    parser.add_argument("--force_categorize", action="store_true", help="If set, categorize again")
+    parser.add_argument("--cell_type", type=str, default="Cell_type", help="Cell type to consider")
+    parser.add_argument("--force_annotate", action="store_true", help="If set, annotate the cells again")
+    parser.add_argument("--force_categorize", action="store_true", help="If set, categorize the cells again")
     args = parser.parse_args()
 
     preprocess = Preprocess(args.platform, args.sample)
-    preprocess.annotation()
+    preprocess.annotation(use_type=args.cell_type)
     preprocess.cell_area_filter()
     preprocess.crop_cells()
