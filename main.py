@@ -26,28 +26,32 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
     parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
     parser.add_argument("--lr_reconstructor", type=float, default=0.01, help="Learning rate of optimizer for reconstructor")
-    parser.add_argument("--lr_classifier", type=float, default=0.1, help="Learning rate of optimizer for classifier")
-    parser.add_argument("--train_reconstructor", action="store_true", help="If set, retrain the reconstruction model")
-    parser.add_argument("--train_classifier", action="store_true", help="If set, retrain the classification model")
+    parser.add_argument("--lr_classifier", type=float, default=0.01, help="Learning rate of optimizer for classifier")
+    parser.add_argument("--train_reconstructor", action="store_true", help="Retrain the reconstruction model")
+    parser.add_argument("--train_classifier", action="store_true", help="Retrain the classification model")
+    parser.add_argument("--rotate", action="store_true", help="Rotate the images in 0, 90, 180 and 270 degree")
     args = parser.parse_args()
 
     if 'lung' in args.sample or 'Lung' in args.sample:
         cell_types = cell_types_lung
 
+    if not args.rotate:
+        angles = [0]
+    else:
+        angles = [0, 90, 180, 270]
+
     paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, args.cell_type, cell_types)
     adata = paired_dataset.cell_select()
     paired_dataset.draw_umaps_expression()
     palette_type = paired_dataset.palette_type
-#    angles = [0]
-    angles = [0, 90, 180, 270]
     train_loader, test_loader = paired_dataset.loaders(args.batch_size, angles)
 
-    reconstruction = Reconstruction(adata, args.platform, args.sample, args.he, args.cell_type)
+    reconstruction = Reconstruction(adata, args.platform, args.sample, args.he, args.cell_type, angles)
     reconstruction.load(train_loader, args.epochs, args.lr_reconstructor, train=args.train_reconstructor)
     reconstruction.evaluate(test_loader)
 #    reconstruction.draw_umaps_embedding(palette_type)
     reconstruction.draw_heatmap(cell_types, palette_type)
 
-    classification = Classification(adata, args.platform, args.sample, args.he, args.cell_type, cell_types)
+    classification = Classification(adata, args.platform, args.sample, args.he, args.cell_type, cell_types, angles)
     classification.load(train_loader, args.epochs, args.lr_classifier, train=args.train_classifier)
     classification.evaluate(test_loader)
