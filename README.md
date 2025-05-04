@@ -13,7 +13,7 @@
 ### Preprocessing
 
 ```
-usage: preprocess.py [-h] [--directory DIRECTORY] [--platform PLATFORM] [--sample SAMPLE]
+usage: preprocess.py [-h] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE] [--sample SAMPLE]
                      [--cell_type CELL_TYPE] [--force_annotate] [--force_categorize]
 
 Sample information
@@ -23,6 +23,7 @@ options:
   --directory DIRECTORY
                         Directory of dataset (default: /data0/crp/dataset/)
   --platform PLATFORM   Platform of spatial transcriptomics (default: Xenium_Prime)
+  --source SOURCE       Data source (default: 10X)
   --sample SAMPLE       Sample name (default: Human_Lung_Cancer)
   --cell_type CELL_TYPE
                         Cell type to consider (default: Cell_type)
@@ -33,9 +34,8 @@ options:
 ### Modeling
 
 ```
-usage: main.py [-h] [--directory DIRECTORY] [--platform PLATFORM] [--sample SAMPLE] [--he HE]
-               [--cell_type CELL_TYPE] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--lr LR]
-               [--train] [--rotate]
+usage: main.py [-h] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE] [--sample SAMPLE] [--he HE]
+               [--cell_type CELL_TYPE] [--batch_size BATCH_SIZE] [--epochs EPOCHS] [--lr LR] [--train] [--rotate]
 
 Sample information and hyperparameters
 
@@ -44,13 +44,14 @@ options:
   --directory DIRECTORY
                         Directory of dataset (default: /data0/crp/dataset/)
   --platform PLATFORM   Platform of spatial transcriptomics (default: Xenium_Prime)
+  --source SOURCE       Data source (default: 10X)
   --sample SAMPLE       Sample name (default: Human_Lung_Cancer)
-  --he HE               H&E images with side length (default: he70)
+  --he HE               H&E images with side length (default: he84)
   --cell_type CELL_TYPE
                         A kind of cell typing to consider (default: Cell_type)
   --batch_size BATCH_SIZE
                         Batch size of data loader (default: 128)
-  --epochs EPOCHS       Number of epochs in training (default: 30)
+  --epochs EPOCHS       Number of epochs in training (default: 20)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --train               Retrain the model (default: False)
   --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
