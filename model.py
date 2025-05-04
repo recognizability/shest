@@ -73,17 +73,40 @@ class Decoder(nn.Module):
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 
-class Reconstructor(nn.Module):
-    def __init__(self, out_features):
+class Classifier(nn.Module):
+    def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        self.out_features = out_features
+        self.bn = nn.BatchNorm1d(in_features)
+        self.fc = nn.Linear(in_features, out_features)
+        self.reset_parameters()
+
+    def forward(self, x):
+        return self.fc(self.bn(x))
+
+    def reset_parameters(self):
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.kaiming_uniform_(module.weight, nonlinearity='linear', generator=generator)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.BatchNorm1d):
+                if module.weight is not None:
+                    nn.init.ones_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+class Model(nn.Module):
+    def __init__(self, n_genes, n_classes):
+        super().__init__()
         self.encoder = Encoder()
-        self.decoder = Decoder(out_features=self.out_features)
+        self.decoder = Decoder(out_features=n_genes)
+        self.classifier = Classifier(out_features=n_classes)
 
     def forward(self, x):
         x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+        mu, alpha = self.decoder(x)
+        logits = self.classifier(x)
+        return mu, alpha, logits
 
 class NegativeBinomialLoss(nn.Module):
    def __init__(self, eps=1e-8):
@@ -97,76 +120,98 @@ class NegativeBinomialLoss(nn.Module):
        loss = -nb.log_prob(target.float())
        return loss.mean()
 
-class Reconstruction():
-    def __init__(self, platform, sample, he, cell_type, angles, var_names, classes):
+class Modeling():
+    def __init__(self, platform, sample, he, cell_type, cell_types, angles, var_names, classes):
         self.platform = platform
         self.sample = sample
         self.he = he
         self.cell_type = cell_type
+        self.cell_types = cell_types
         self.angles = angles
         self.angles_string = '_'.join(map(str, self.angles))
 
         self.var_names = var_names
-        self.reconstructor = Reconstructor(out_features=len(self.var_names))
-
+        self.n_genes = len(self.var_names)
         self.classes = classes
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)
+        self.n_classes = len(classes)
+
+        self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
+        self.model.to(device)
 
         self.images = None
-        self.labels = None
         self.expressions = None
         self.embeddings = None
         self.reconstructions = None
+        self.labels = None
+        self.predictions = None
 
-        self.criterion = NegativeBinomialLoss()
+        self.criterion_reconstruction = NegativeBinomialLoss()
+        self.criterion_classification = nn.CrossEntropyLoss()
 
-    def load(self, train_loader, epochs, lr, train=False, patience=3):
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
-        if not os.path.isfile(reconstructor_file) or train:
-            self.reconstructor.to(device)
-            optimizer = torch.optim.AdamW(self.reconstructor.parameters(), lr=lr, weight_decay=1e-4)
-            best_loss = float('inf')
+    def load(self, train_loader, epochs, lr, train=False):
+        model_file = f"/data0/crp/models/model_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
+        if not os.path.isfile(model_file) or train:
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-4)
+            best_loss_reconstruction = float('inf')
+            best_loss_classification = float('inf')
             counter = 0
 
             gc.collect()
             torch.cuda.empty_cache()
             
-            print(f"Training the reconstruction model ...")
+            print(f"Training the model ...")
             for epoch in range(epochs):
-                self.reconstructor.train()
-                train_loss = 0
+                self.model.train()
+                train_loss_reconstruction = 0
+                train_loss_classification = 0
+
                 for cell_id, image, expression, label in tqdm(train_loader):
                     image = image.to(device, non_blocking=True)
                     expression = expression.to(device, non_blocking=True)
+                    label = label.to(device, non_blocking=True)
                     
-                    embedding = self.reconstructor.encoder(image)
+                    embedding = self.model.encoder(image)
                     if torch.isnan(embedding).any():
                         print("nan found in embedding")
                         sys.exit()
-
-                    mu, alpha = self.reconstructor.decoder(embedding)
+                    mu, alpha = self.model.decoder(embedding)
                     if torch.isnan(mu).any():
                         print("nan found in mu")
                         sys.exit()
                     if torch.isnan(alpha).any():
                         print("nan found in alpha")
                         sys.exit()
+                    logit = self.model.classifier(embedding)
+                    if torch.isnan(logit).any():
+                        print("nan found in logit")
+                        sys.exit()
 
                     optimizer.zero_grad()
-                    loss = self.criterion(mu, alpha, expression)
+                    loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
+                    loss_classification = self.criterion_classification(logit, label)
+                    loss = loss_reconstruction / 3 + loss_classification
                     loss.backward()
                     optimizer.step()
-                    
-                    train_loss += loss.item()
 
-                    del image, expression
+                    train_loss_reconstruction += loss_reconstruction.item()
+                    train_loss_classification += loss_classification.item()
 
-                average_loss = train_loss / len(train_loader)
-                print(f"Epoch: {epoch+1}/{epochs}, Loss: {average_loss:.5f}")
+                    del image, expression, label, embedding, mu, alpha, logit
 
-                if best_loss == float('inf') or (best_loss - average_loss) / best_loss >= 0.001:
-                    best_loss = average_loss
+                average_loss_reconstruction = train_loss_reconstruction / len(train_loader)
+                average_loss_classification = train_loss_classification / len(train_loader)
+                print(f"Epoch: {epoch+1}/{epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
+
+                if best_loss_reconstruction == float('inf') or (best_loss_reconstruction - average_loss_reconstruction) / best_loss_reconstruction >= 0.001:
+                    best_loss_reconstruction = average_loss_reconstruction
+                else:
+                    counter += 1
+                    print(f"Early stopping counter: {counter}/{patience}")
+
+                if best_loss_classification == float('inf') or (best_loss_classification - average_loss_classification) / best_loss_classification >= 0.001:
+                    best_loss_classification = average_loss_classification
                 else:
                     counter += 1
                     print(f"Early stopping counter: {counter}/{patience}")
@@ -178,64 +223,69 @@ class Reconstruction():
             gc.collect()
             torch.cuda.empty_cache()
 
-            torch.save(self.reconstructor.state_dict(), reconstructor_file)
+            torch.save(self.model.state_dict(), model_file)
         else: 
-            self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
+            self.model.load_state_dict(torch.load(model_file, map_location=device))
 
     def evaluate(self, test_loader):
-        self.reconstructor.to(device)
-        self.reconstructor.eval()
+        self.model.eval()
 
         images = [] 
         expressions = []
         embeddings = []
         reconstructions = []
         labels = []
+        predictions = []
         
         gc.collect()
         torch.cuda.empty_cache()
 
-        test_loss = 0
+        test_loss_reconstruction = 0
+        test_loss_classification = 0
 
-        print(f"Evaluating the reconstruction model ...")
+        print(f"Evaluating the model ...")
         with torch.no_grad():
             for cell_id, image, expression, label in tqdm(test_loader):
                 image = image.to(device, non_blocking=True)
-                images.append(image.view(image.shape[0], -1).detach().cpu())
-
                 expression = expression.to(device, non_blocking=True)
+                label = label.to(device, non_blocking=True)
+
+                embedding = self.model.encoder(image)
+                mu, alpha = self.model.decoder(embedding)
+                logit = self.model.classifier(embedding)
+                prediction = torch.argmax(logit, dim=1)
+
+                loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
+                loss_classification = self.criterion_classification(logit, label)
+
+                test_loss_reconstruction += loss_reconstruction.item()
+                test_loss_classification += loss_classification.item()
+
+                images.append(image.view(image.shape[0], -1).detach().cpu())
                 expressions.append(expression.detach().cpu())
-                
-                embedding = self.reconstructor.encoder(image)
+                labels.append(label.detach().cpu())
                 embeddings.append(embedding.detach().cpu())
-
-                mu, alpha = self.reconstructor.decoder(embedding)
-
-                loss = self.criterion(mu, alpha, expression)
-                test_loss += loss.item()
-
-                labels.extend(label)
-
                 reconstruction = mu
                 reconstructions.append(reconstruction.detach().cpu())
+                predictions.append(prediction.detach().cpu())
 
-                del image, expression, embedding, reconstruction
+                del image, expression, label, embedding, mu, alpha, logit, reconstruction, prediction
                 
-        print(f"Test Loss: {test_loss / len(test_loader):.5f}")
+        print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(test_loader):.5f}")
+        print(f"Test Loss of classification: {test_loss_classification / len(test_loader):.5f}")
 
-        images = torch.cat(images).numpy()
-        expressions = torch.cat(expressions).numpy()
-        embeddings = torch.cat(embeddings).numpy()
-        reconstructions = torch.cat(reconstructions).numpy()
+        self.images = torch.cat(images).numpy()
+        self.expressions = torch.cat(expressions).numpy()
+        self.embeddings = torch.cat(embeddings).numpy()
+        self.reconstructions = torch.cat(reconstructions).numpy()
+        self.labels = self.label_encoder.inverse_transform(
+            torch.cat(labels).numpy()
+        )
+        self.predictions = self.label_encoder.inverse_transform(
+            torch.cat(predictions).numpy()
+        )
 
-        self.images = images
-        self.expressions = expressions
-        self.embeddings = embeddings
-        self.reconstructions = reconstructions
-
-        self.labels = self.label_encoder.inverse_transform(labels)
-
-        del images, expressions, embeddings, reconstructions, labels
+        del images, expressions, embeddings, reconstructions, labels, predictions
         
         gc.collect()
         torch.cuda.empty_cache()
@@ -335,162 +385,23 @@ class Reconstruction():
         plt.savefig(f"/data0/crp/results/expression_reconstruction_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
         plt.close()
 
-class Classifier(nn.Module):
-    def __init__(self, out_features, in_features=in_features):
-        super().__init__()
-        self.bn = nn.BatchNorm1d(in_features)
-        self.fc = nn.Linear(in_features, out_features)
-        self.reset_parameters()
-
-    def forward(self, x):
-        return self.fc(self.bn(x))
-
-    def reset_parameters(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_uniform_(module.weight, nonlinearity='linear', generator=generator)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.BatchNorm1d):
-                if module.weight is not None:
-                    nn.init.ones_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-class Classification():
-    def __init__(self, platform, sample, he, cell_type, cell_types, angles, var_names, classes):
-        self.platform = platform
-        self.sample = sample
-        self.he = he
-        self.cell_type = cell_type
-        self.angles = angles
-        self.angles_string = '_'.join(map(str, self.angles))
-        self.var_names = var_names
-        self.classes = classes
-
-        self.label_encoder = LabelEncoder()
-        self.label_encoder.fit(self.classes)
-
-        self.reconstructor = Reconstructor(out_features=len(self.var_names))
-        reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
-        self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
-        self.reconstructor.to(device)
-        self.reconstructor.eval()
-        self.encoder = self.reconstructor.encoder
-        
-        self.cell_types = cell_types
-    
-        self.classifier = Classifier(out_features=len(self.classes))
-        self.classifier.to(device)
-
-        self.criterion = nn.CrossEntropyLoss()
-
-    def load(self, train_loader, epochs, lr, train=False, patience=3):
-        classifier_file = f"/data0/crp/models/classifier_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
-        if not os.path.isfile(classifier_file) or train:
-            optimizer = torch.optim.AdamW(self.classifier.parameters(), lr=lr, weight_decay=1e-4)
-            best_loss = float('inf')
-            counter = 0
-
-            print(f"Training the {self.cell_type} prediction model ...")
-            for epoch in range(epochs):
-                self.classifier.train()
-            
-                train_loss = 0
-            
-                for cell_id, image, expression, label in tqdm(train_loader):
-                    image = image.to(device, non_blocking=True)
-                    label = label.to(device, non_blocking=True)
-            
-                    with torch.no_grad():  
-                        embedding = self.encoder(image)
-           
-                    logit = self.classifier(embedding)
-                    
-                    optimizer.zero_grad()
-                    loss = self.criterion(logit, label)
-                    loss.backward()
-                    optimizer.step()
-            
-                    train_loss += loss.item()
-
-                    del image, label
-            
-                average_loss = train_loss / len(train_loader)
-                print(f"Epoch: {epoch+1}/{epochs}, Loss: {average_loss:.4f}")
-
-                if best_loss == float('inf') or (best_loss - average_loss) / best_loss >= 0.001:
-                    best_loss = average_loss
-                else:
-                    counter += 1
-                    print(f"Early stopping counter: {counter}/{patience}")
-
-                if counter >= patience:
-                    print("The training is stopped eraly.")
-                    break
-                    
-            gc.collect()
-            torch.cuda.empty_cache()
-            torch.save(self.classifier.state_dict(), classifier_file)
-            
-        else: 
-            self.classifier.load_state_dict(torch.load(classifier_file, map_location=device))
-    
-    def evaluate(self, test_loader):
-        self.classifier.eval()
-        
-        labels = []
-        predictions = []
-        
-        test_loss = 0
-
-        print(f"Evaluating the {self.cell_type} prediction model ...")
-        with torch.no_grad():
-            for cell_id, image, expression, label in tqdm(test_loader):
-                image = image.to(device, non_blocking=True)
-                label = label.to(device, non_blocking=True)
-                labels.append(label.detach().cpu())
-        
-                embedding = self.encoder(image)
-        
-                logit = self.classifier(embedding)
-                loss = self.criterion(logit, label)
-                test_loss += loss.item()
-                
-                prediction = torch.argmax(logit, dim=1)
-                predictions.append(prediction.detach().cpu())
-
-                del label, prediction
-
-        print(f"Test Loss: {test_loss / len(test_loader):.4f}")
-        
-        labels = torch.cat(labels).numpy()
-        predictions = torch.cat(predictions).numpy()
-        
-        labels = self.label_encoder.inverse_transform(labels)
-        predictions = self.label_encoder.inverse_transform(predictions)
-            
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        f1 = f1_score(labels, predictions, average='weighted')
+    def draw_confusion_matrix(self):
+        f1 = f1_score(self.labels, self.predictions, average='weighted')
         print('Average F1 score', f1)
-    
-        cm = confusion_matrix(labels, predictions, labels=self.classes)
-        del labels, predictions
-        
+
+        cm = confusion_matrix(self.labels, self.predictions, labels=self.classes)
+
         plt.figure(figsize=(len(self.classes)//2+2, len(self.classes)//2))
         sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes)
-        plt.title(f"{self.cell_type} (f1={f1:.4f})") 
-        plt.xlabel('Prediction') 
+        plt.title(f"{self.cell_type} (f1={f1:.4f})")
+        plt.xlabel('Prediction')
         plt.ylabel('Label')
 
         plt.savefig(f"/data0/crp/results/confusion_matrix_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
-    
+
     def infer(self, inference_loader):
-        self.classifier.eval()
-        
+        self.model.eval()
         predictions = []
         
         print(f"Inferring with the {self.cell_type} prediction model ...")

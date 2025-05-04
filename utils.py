@@ -75,6 +75,7 @@ class PairedDataset():
         elif self.cell_type == 'Cell_subtype_ST':
             self.parameters =  sum(self.cell_types.values(), [])
         self.label_encoder.fit(self.parameters)
+        self.label_encoder.classes_ = np.array(self.parameters)
         self.classes = self.label_encoder.classes_
     
         print('Expression profile and their cell types loading ... ', end='')
