@@ -46,6 +46,6 @@ if __name__ == "__main__":
     modeling = Modeling(args.platform, args.sample, args.he, args.cell_type, cell_types, angles, var_names, classes)
     modeling.load(train_loader, args.epochs, args.lr, train=args.train)
     modeling.evaluate(test_loader)
-#    model.draw_umaps_embedding(palette_type)
+    modeling.draw_umaps_embedding(palette_type)
     modeling.draw_heatmap(cell_types, palette_type)
     modeling.draw_confusion_matrix()

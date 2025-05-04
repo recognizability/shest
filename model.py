@@ -15,14 +15,16 @@ import torchvision.models as models
 
 from umap import UMAP
 from sklearn.preprocessing import StandardScaler
+from tqdm.contrib.concurrent import thread_map
 
 import seaborn as sns
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, f1_score
 
-from config import seed, set_seed, generator, device
+from config import n_cores, seed, set_seed, generator, device
 
 in_features = 1000 #output features of ViT or SwinTransformer
 
@@ -154,9 +156,6 @@ class Modeling():
         model_file = f"/data0/crp/models/model_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
         if not os.path.isfile(model_file) or train:
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-4)
-            best_loss_reconstruction = float('inf')
-            best_loss_classification = float('inf')
-            counter = 0
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -191,7 +190,7 @@ class Modeling():
                     optimizer.zero_grad()
                     loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
                     loss_classification = self.criterion_classification(logit, label)
-                    loss = loss_reconstruction / 3 + loss_classification
+                    loss = loss_reconstruction + loss_classification
                     loss.backward()
                     optimizer.step()
 
@@ -204,22 +203,6 @@ class Modeling():
                 average_loss_classification = train_loss_classification / len(train_loader)
                 print(f"Epoch: {epoch+1}/{epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
 
-                if best_loss_reconstruction == float('inf') or (best_loss_reconstruction - average_loss_reconstruction) / best_loss_reconstruction >= 0.001:
-                    best_loss_reconstruction = average_loss_reconstruction
-                else:
-                    counter += 1
-                    print(f"Early stopping counter: {counter}/{patience}")
-
-                if best_loss_classification == float('inf') or (best_loss_classification - average_loss_classification) / best_loss_classification >= 0.001:
-                    best_loss_classification = average_loss_classification
-                else:
-                    counter += 1
-                    print(f"Early stopping counter: {counter}/{patience}")
-
-                if counter >= patience:
-                    print("The training is stopped eraly.")
-                    break
-            
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -296,25 +279,25 @@ class Modeling():
 
     def draw_umaps_embedding(self, palette_he):
         print("Standardizing ... ", end='')
-        scaler = StandardScaler()
-        images_scaled, expressions_scaled, embeddings_scaled, reconstructions_scaled = map(
-            scaler.fit_transform, 
-            [self.images, self.expressions, self.embeddings, self.reconstructions]
+        images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled = thread_map(
+            lambda x: StandardScaler().fit_transform(x), 
+            [self.images, self.embeddings, self.expressions, self.reconstructions],
+            max_workers=n_cores,
         )
-        print(images_scaled.shape, expressions_scaled.shape, embeddings_scaled.shape, reconstructions_scaled.shape)
+        print(images_scaled.shape, embeddings_scaled.shape, expressions_scaled.shape, reconstructions_scaled.shape)
 
         print("2D umapping ... ", end='')
-        image_umap, expression_umap, reconstruction_umap, embedding_umap = map(
+        image_umap, embedding_umap, expression_umap, reconstruction_umap = map(
             self._apply_umap, 
-            [images_scaled, expressions_scaled, embeddings_scaled, reconstructions_scaled]
+            [images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled]
         )
-        print(image_umap.shape, expression_umap.shape, embedding_umap.shape, reconstruction_umap.shape)
+        print(image_umap.shape, embedding_umap.shape, expression_umap.shape, reconstruction_umap.shape)
 
         umaps = {
             'H&E images': image_umap, 
+            'embeddings': embedding_umap,
             'gene expressions': expression_umap, 
             'reconstructions': reconstruction_umap, 
-            'embeddings': embedding_umap
         }
 
         fig, ax = plt.subplots(1, len(umaps), figsize=(13, 3))
@@ -345,44 +328,44 @@ class Modeling():
             obs = pd.DataFrame({self.cell_type: self.labels})
         )
 
-        fig, ax = plt.subplots(1, 2, figsize=(7, 3))
-        
         sc.pp.normalize_total(adata_actual, target_sum=1e4)
         sc.pp.log1p(adata_actual)
-        sc.pp.neighbors(adata_actual, random_state=seed)
-        sc.tl.umap(adata_actual, random_state=seed)
-        sc.pl.umap(adata_actual, color=self.cell_type, palette=palette_he, show=False, ax=ax[0], legend_loc=None, use_raw=False)
-        
+        adata_actual.obs[self.cell_type] = adata_actual.obs[self.cell_type].astype('category')
+
         sc.pp.normalize_total(adata_reconstruction, target_sum=1e4)
         sc.pp.log1p(adata_reconstruction)
-        sc.pp.neighbors(adata_reconstruction, random_state=seed)
-        sc.tl.umap(adata_reconstruction, random_state=seed)
-        sc.pl.umap(adata_reconstruction, color=self.cell_type, palette=palette_he, show=False, ax=ax[1], use_raw=False)
-        
-        fig.tight_layout()
-        plt.close()
+        adata_reconstruction.obs[self.cell_type] = adata_reconstruction.obs[self.cell_type].astype('category')
         
         sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type)
-        
-        cell_types_cutoff = adata_actual.obs[self.cell_type].value_counts()
-        cell_types_cutoff = cell_types_cutoff[cell_types_cutoff > 3]
-        cell_types_cutoff = cell_types_cutoff.index.tolist()
-        cell_types_cutoff = [cell_type for cell_type in cell_types.keys() if cell_type in cell_types_cutoff]
-        
         top_markers = []
-        for cell_type in cell_types_cutoff:
+        for cell_type in self.cell_types:
             top_markers.append(sc.get.rank_genes_groups_df(adata_actual, group=cell_type)['names'].values[:10].tolist())
         top_markers = sum(top_markers, [])
         
         sc.tl.dendrogram(adata_actual, groupby=self.cell_type)
-        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f"/data0/crp/results/expression_actual_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
-        plt.close()
-        
         sc.tl.dendrogram(adata_reconstruction, groupby=self.cell_type)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type)
-        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False)
-        plt.savefig(f"/data0/crp/results/expression_reconstruction_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
+
+        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True)
+        plt.tight_layout()
+        plt.savefig("/tmp/heatmap_actual.png")
+        plt.close()
+        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=True)
+        plt.tight_layout()
+        plt.savefig("/tmp/heatmap_reconstruction.png")
+        plt.close()
+
+        fig, ax = plt.subplots(2, figsize=(12, 10))
+        ax[0].imshow(mpimg.imread("/tmp/heatmap_actual.png"))
+        ax[0].axis('off')
+        ax[0].set_title("Actual")
+
+        ax[1].imshow(mpimg.imread("/tmp/heatmap_reconstruction.png"))
+        ax[1].axis('off')
+        ax[1].set_title("Reconstructed")
+
+        plt.tight_layout()
+        plt.savefig(f"/data0/crp/results/expression_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
