@@ -24,25 +24,26 @@ from config import n_cores, seed, set_seed, cell_types_lung
 sc.settings.n_jobs = n_cores
 
 class Preprocess():
-    def __init__(self, platform, sample):
+    def __init__(self, platform, source, sample):
         self.platform = platform
+        self.source = source
         self.sample = sample
-        self.pixel_size = json.load(open(f"/data0/{self.platform}/{self.sample}/experiment.xenium"))['pixel_size'] # micrometers per pixel
+        raw_path = f"/data0/{self.platform}/{self.source}/{self.sample}/"
+        self.pixel_size = json.load(open(raw_path + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower_bound = int(4 // self.pixel_size) #micrometer/(micrometer/pixel)
-        self.upper_bound = int(15 // self.pixel_size) #micrometer/(micrometer/pixel)
+        self.upper_bound = int(18 // self.pixel_size) #micrometer/(micrometer/pixel)
         self.crop_size = self.upper_bound
 
         if 'lung' in self.sample or 'Lung' in self.sample:
             self.organ = 'Lung'
             self.cell_types = cell_types_lung
 
-        raw_path = f"/data0/{self.platform}/{self.sample}/"
         self.sdata = self._prepare_sdata(raw_path)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.cell_boundaries = self.sdata.shapes["cell_boundaries"]
         self.adata = self.sdata.tables['table']
 
-        self.processed_path = args.directory + f"{self.platform}/{self.sample}/"
+        self.processed_path = args.directory + f"{self.platform}/{self.source}/{self.sample}/"
         os.makedirs(self.processed_path, exist_ok=True)
 
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
@@ -121,8 +122,6 @@ class Preprocess():
                 self.adata.obs['Cell_type'] = self.adata.obs.loc[self.adata.obs['Cell_type_ST'].astype(str) == self.adata.obs['Cell_type_HE'].astype(str), 'Cell_type_HE']
                 self.adata.obs = self.adata.obs[['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type']]
                 self.adata.raw = self.adata
-#                sc.pp.normalize_total(self.adata, target_sum=1e4)
-#                sc.pp.log1p(self.adata)
 
                 self.adata.write(adata_file)
             else:
@@ -131,6 +130,33 @@ class Preprocess():
         self.use_type = use_type
         self.annotated_cell_ids = self.adata.obs[self.adata.obs[self.use_type].notna()].index
         print(f'{len(self.annotated_cell_ids)} cells are used to make their H&E images')
+
+    def cell_area_filter(self):
+        bounds = self.cell_boundaries.bounds
+        len_raw = len(bounds)
+        bounds = bounds / self.pixel_size
+        bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
+        bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
+        bounds = bounds.merge(self.adata.obs['Cell_type'], how='left', left_index=True, right_index=True)
+        bounds_melted = bounds.melt(id_vars='Cell_type', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
+        bounds_melted["Length_(μm)"] *= self.pixel_size
+
+
+        fig = plt.figure(figsize=(4, 4))
+        sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type', hue='Length', split=True, inner='quart')
+        plt.axvline(x=self.upper_bound*self.pixel_size, linestyle='--', color='gray')
+        plt.axvline(x=self.lower_bound*self.pixel_size, linestyle='--', color='gray')
+        fig.tight_layout()
+        fig.savefig(f"/data0/crp/results/violinplot_{self.platform}_{self.source}_{self.sample}.png", bbox_inches="tight")
+        plt.close(fig)
+        
+        self.filtered_cell_ids = bounds[
+            (self.lower_bound <= bounds['width']) & 
+            (bounds['width'] < self.upper_bound) &
+            (self.lower_bound <= bounds['height']) & 
+            (bounds['height'] < self.upper_bound)
+        ].index
+        print(f"{len(self.filtered_cell_ids)} cells are selected from {len_raw} cells.")
 
     def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)
@@ -164,30 +190,6 @@ class Preprocess():
             cropped_image = Image.fromarray(cropped_image)
             cropped_image.save(self.image_path + f"{cell_id}.png")
         
-    def cell_area_filter(self):
-        bounds = self.cell_boundaries.bounds
-        len_raw = len(bounds)
-        bounds = bounds / self.pixel_size
-        bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
-        bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
-        bounds = bounds.merge(self.adata.obs['Cell_type'], how='left', left_index=True, right_index=True)
-        bounds_melted = bounds.melt(id_vars='Cell_type', value_vars=['width', 'height'], var_name='Length', value_name='Value')
-
-
-        fig = plt.figure(figsize=(4, 4))
-        sns.violinplot(bounds_melted, x='Value', y='Cell_type', hue='Length', split=True)
-        fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/violinplot_{self.platform}_{self.sample}.png", bbox_inches="tight")
-        plt.close(fig)
-        
-        self.filtered_cell_ids = bounds[
-            (self.lower_bound <= bounds['width']) & 
-            (bounds['width'] < self.upper_bound) &
-            (self.lower_bound <= bounds['height']) & 
-            (bounds['height'] < self.upper_bound)
-        ].index
-        print(f"{len(self.filtered_cell_ids)} cells are selected from {len_raw} cells.")
-
     def crop_cells(self):
         self.image_path = self.processed_path + f'he{self.crop_size}/{self.use_type}/'
         os.makedirs(self.image_path, exist_ok=True)
@@ -203,13 +205,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
+    parser.add_argument("--source", type=str, default="10X", help="Data source")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
     parser.add_argument("--cell_type", type=str, default="Cell_type", help="Cell type to consider")
     parser.add_argument("--force_annotate", action="store_true", help="If set, annotate the cells again")
     parser.add_argument("--force_categorize", action="store_true", help="If set, categorize the cells again")
     args = parser.parse_args()
 
-    preprocess = Preprocess(args.platform, args.sample)
+    preprocess = Preprocess(args.platform, args.source, args.sample)
     preprocess.annotation(use_type=args.cell_type)
     preprocess.cell_area_filter()
     preprocess.crop_cells()

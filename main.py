@@ -20,11 +20,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--directory", type=str, default="/data0/crp/dataset/", help="Directory of dataset")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
+    parser.add_argument("--source", type=str, default="10X", help="Data source")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
-    parser.add_argument("--he", type=str, default="he70", help="H&E images with side length")
+    parser.add_argument("--he", type=str, default="he84", help="H&E images with side length")
     parser.add_argument("--cell_type", type=str, default="Cell_type", help="A kind of cell typing to consider")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
-    parser.add_argument("--epochs", type=int, default=30, help="Number of epochs in training")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
     parser.add_argument("--train", action="store_true", help="Retrain the model")
     parser.add_argument("--rotate", action="store_true", help="Rotate the images in 0, 90, 180 and 270 degree")
@@ -38,14 +39,14 @@ if __name__ == "__main__":
     else:
         angles = [0, 90, 180, 270]
 
-    paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, args.cell_type, cell_types, angles)
-#    paired_dataset.draw_umaps_expression()
+    paired_dataset = PairedDataset(args.directory, args.platform, args.source, args.sample, args.he, args.cell_type, cell_types, angles)
+    paired_dataset.draw_umaps_expression()
     palette_type = paired_dataset.palette_type
     var_names, classes, train_loader, test_loader = paired_dataset.get_dataloaders(args.batch_size)
 
-    modeling = Modeling(args.platform, args.sample, args.he, args.cell_type, cell_types, angles, var_names, classes)
+    modeling = Modeling(args.platform, args.source, args.sample, args.he, args.cell_type, cell_types, angles, var_names, classes)
     modeling.load(train_loader, args.epochs, args.lr, train=args.train)
     modeling.evaluate(test_loader)
-    modeling.draw_umaps_embedding(palette_type)
+#    modeling.draw_umaps_embedding(palette_type)
     modeling.draw_heatmap(cell_types, palette_type)
     modeling.draw_confusion_matrix()

@@ -40,7 +40,7 @@ class Encoder(nn.Module):
     def forward(self, x):
         return self.encoder(x)
 
-class Decoder(nn.Module):
+class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
         hidden = 2048
@@ -101,12 +101,12 @@ class Model(nn.Module):
     def __init__(self, n_genes, n_classes):
         super().__init__()
         self.encoder = Encoder()
-        self.decoder = Decoder(out_features=n_genes)
+        self.reconstructor = Reconstructor(out_features=n_genes)
         self.classifier = Classifier(out_features=n_classes)
 
     def forward(self, x):
         x = self.encoder(x)
-        mu, alpha = self.decoder(x)
+        mu, alpha = self.reconstructor(x)
         logits = self.classifier(x)
         return mu, alpha, logits
 
@@ -123,8 +123,9 @@ class NegativeBinomialLoss(nn.Module):
        return loss.mean()
 
 class Modeling():
-    def __init__(self, platform, sample, he, cell_type, cell_types, angles, var_names, classes):
+    def __init__(self, platform, source, sample, he, cell_type, cell_types, angles, var_names, classes):
         self.platform = platform
+        self.source = source
         self.sample = sample
         self.he = he
         self.cell_type = cell_type
@@ -153,7 +154,7 @@ class Modeling():
         self.criterion_classification = nn.CrossEntropyLoss()
 
     def load(self, train_loader, epochs, lr, train=False):
-        model_file = f"/data0/crp/models/model_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
+        model_file = f"/data0/crp/models/model_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
         if not os.path.isfile(model_file) or train:
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-4)
 
@@ -161,6 +162,7 @@ class Modeling():
             torch.cuda.empty_cache()
             
             print(f"Training the model ...")
+            escape = False
             for epoch in range(epochs):
                 self.model.train()
                 train_loss_reconstruction = 0
@@ -174,18 +176,22 @@ class Modeling():
                     embedding = self.model.encoder(image)
                     if torch.isnan(embedding).any():
                         print("nan found in embedding")
-                        sys.exit()
-                    mu, alpha = self.model.decoder(embedding)
+                        escape = True
+                        break
+                    mu, alpha = self.model.reconstructor(embedding)
                     if torch.isnan(mu).any():
                         print("nan found in mu")
-                        sys.exit()
+                        escape = True
+                        break
                     if torch.isnan(alpha).any():
                         print("nan found in alpha")
-                        sys.exit()
+                        escape = True
+                        break
                     logit = self.model.classifier(embedding)
                     if torch.isnan(logit).any():
                         print("nan found in logit")
-                        sys.exit()
+                        escape = True
+                        break
 
                     optimizer.zero_grad()
                     loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
@@ -199,14 +205,18 @@ class Modeling():
 
                     del image, expression, label, embedding, mu, alpha, logit
 
+                if escape:
+                    break
+
                 average_loss_reconstruction = train_loss_reconstruction / len(train_loader)
                 average_loss_classification = train_loss_classification / len(train_loader)
                 print(f"Epoch: {epoch+1}/{epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
 
+                torch.save(self.model.state_dict(), model_file)
+
             gc.collect()
             torch.cuda.empty_cache()
 
-            torch.save(self.model.state_dict(), model_file)
         else: 
             self.model.load_state_dict(torch.load(model_file, map_location=device))
 
@@ -234,7 +244,7 @@ class Modeling():
                 label = label.to(device, non_blocking=True)
 
                 embedding = self.model.encoder(image)
-                mu, alpha = self.model.decoder(embedding)
+                mu, alpha = self.model.reconstructor(embedding)
                 logit = self.model.classifier(embedding)
                 prediction = torch.argmax(logit, dim=1)
 
@@ -273,10 +283,6 @@ class Modeling():
         gc.collect()
         torch.cuda.empty_cache()
 
-    def _apply_umap(self, data):
-        reducer = UMAP(n_components=2, n_jobs=-1, low_memory=True, random_state=seed)
-        return reducer.fit_transform(data)
-
     def draw_umaps_embedding(self, palette_he):
         print("Standardizing ... ", end='')
         images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled = thread_map(
@@ -288,7 +294,7 @@ class Modeling():
 
         print("2D umapping ... ", end='')
         image_umap, embedding_umap, expression_umap, reconstruction_umap = map(
-            self._apply_umap, 
+            lambda x: UMAP(n_components=2, n_jobs=n_cores, low_memory=True, random_state=seed).fit_transform(x),
             [images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled]
         )
         print(image_umap.shape, embedding_umap.shape, expression_umap.shape, reconstruction_umap.shape)
@@ -313,7 +319,7 @@ class Modeling():
         plt.legend(markers, palette_he.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self, cell_types, palette_he):
@@ -365,7 +371,7 @@ class Modeling():
         ax[1].set_title("Reconstructed")
 
         plt.tight_layout()
-        plt.savefig(f"/data0/crp/results/expression_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
+        plt.savefig(f"/data0/crp/results/expression_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
@@ -380,7 +386,7 @@ class Modeling():
         plt.xlabel('Prediction')
         plt.ylabel('Label')
 
-        plt.savefig(f"/data0/crp/results/confusion_matrix_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        plt.savefig(f"/data0/crp/results/confusion_matrix_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
     def infer(self, inference_loader):

@@ -45,9 +45,10 @@ def preprocessing(adata):
     return adata
 
 class PairedDataset():
-    def __init__(self, directory, platform, sample, he, cell_type, cell_types, angles):
+    def __init__(self, directory, platform, source, sample, he, cell_type, cell_types, angles):
         self.directory = directory
         self.platform = platform
+        self.source = source
         self.sample = sample
         self.he = he
         self.cell_type = cell_type
@@ -64,7 +65,8 @@ class PairedDataset():
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
-        image_dir = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type)
+        base_dir = os.path.join(self.directory, self.platform, self.source, self.sample)
+        image_dir = os.path.join(base_dir, self.he, self.cell_type)
         image_files = glob(os.path.join(image_dir, '*.png'))
         image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
         print(len(image_ids), "images of the cells are prepared.")
@@ -73,16 +75,16 @@ class PairedDataset():
         if self.cell_type == 'Cell_type' or self.cell_type == 'Cell_type_ST' or self.cell_type == 'Cell_type_HE':
             self.parameters = list(self.cell_types.keys())
         elif self.cell_type == 'Cell_subtype_ST':
-            self.parameters =  sum(self.cell_types.values(), [])
+            self.parameters =  self.cell_subtypes
         self.label_encoder.fit(self.parameters)
         self.label_encoder.classes_ = np.array(self.parameters)
         self.classes = self.label_encoder.classes_
     
         print('Expression profile and their cell types loading ... ', end='')
-        adata_file = f'{self.directory}{self.platform}/{self.sample}/annotation/adata_{self.he}.h5ad'
-        adata_raw = sc.read_h5ad(adata_file)
-        print(adata_raw.shape)
-        type_ids = adata_raw.obs[self.cell_type].dropna().index.tolist()
+        adata_file = os.path.join(base_dir, f'annotation/adata_{self.he}.h5ad')
+        self.adata_raw = sc.read_h5ad(adata_file)
+        print(self.adata_raw.shape)
+        type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
         print(len(type_ids), "of annotated cells are loaded.")
 
         self.cell_ids = sorted(list(set(image_ids) & set(type_ids)))
@@ -92,7 +94,7 @@ class PairedDataset():
             lambda file: os.path.join(image_dir, f"{file}.png")
         ).to_dict()
 
-        self.adata = adata_raw[self.cell_ids, :].copy()
+        self.adata = self.adata_raw[self.cell_ids, :].copy()
         print(self.adata.obs[self.cell_type].value_counts())
         self.cell_type_encoded = self.cell_type + '_encoded'
         self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
@@ -125,33 +127,18 @@ class PairedDataset():
 
     def draw_umaps_expression(self):
         fig, ax = plt.subplots(3, 2, figsize=(7, 9))
-
-        sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type_ST']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
-           orient = 'h',
-           palette = self.palette_type,
-           ax=ax[0][0]
-        )
-        sc.pl.umap(self.adata, color='Cell_type_ST', palette=self.palette_type, ax=ax[0][1], show=False, legend_loc=None)
-
-        sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type_HE']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
-           orient = 'h',
-           palette = self.palette_type,
-           ax=ax[1][0]
-        )
-        sc.pl.umap(self.adata, color='Cell_type_HE', palette=self.palette_type, ax=ax[1][1], show=False, legend_loc=None)
-
-        sns.barplot(
-           pd.DataFrame(self.adata.obs.groupby(['Cell_type']).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
-           orient = 'h',
-           palette = self.palette_type,
-           ax=ax[2][0]
-        )
-        sc.pl.umap(self.adata, color='Cell_type', palette=self.palette_type, ax=ax[2][1], show=False, legend_loc=None)
+        for i, cell_type in enumerate(['Cell_type_ST', 'Cell_type_HE', 'Cell_type']):
+            cell_types = self.adata_raw.obs[cell_type].value_counts().index.tolist()
+            sns.barplot(
+               pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
+               orient = 'h',
+               palette = self.palette_type,
+               ax=ax[i][0]
+            )
+            sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
 
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.source}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
     def get_dataloaders(self, batch_size, split=0.8):
