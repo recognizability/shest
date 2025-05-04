@@ -24,7 +24,7 @@ if __name__ == "__main__":
     parser.add_argument("--he", type=str, default="he70", help="H&E images with side length")
     parser.add_argument("--cell_type", type=str, default="Cell_type", help="A kind of cell typing to consider")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
-    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
+    parser.add_argument("--epochs", type=int, default=30, help="Number of epochs in training")
     parser.add_argument("--lr_reconstructor", type=float, default=0.01, help="Learning rate of optimizer for reconstructor")
     parser.add_argument("--lr_classifier", type=float, default=0.01, help="Learning rate of optimizer for classifier")
     parser.add_argument("--train_reconstructor", action="store_true", help="Retrain the reconstruction model")
@@ -40,18 +40,17 @@ if __name__ == "__main__":
     else:
         angles = [0, 90, 180, 270]
 
-    paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, args.cell_type, cell_types)
-    adata = paired_dataset.cell_select()
-    paired_dataset.draw_umaps_expression()
+    paired_dataset = PairedDataset(args.directory, args.platform, args.sample, args.he, args.cell_type, cell_types, angles)
+#    paired_dataset.draw_umaps_expression()
     palette_type = paired_dataset.palette_type
-    train_loader, test_loader = paired_dataset.loaders(args.batch_size, angles)
+    var_names, classes, train_loader, test_loader = paired_dataset.get_dataloaders(args.batch_size)
 
-    reconstruction = Reconstruction(adata, args.platform, args.sample, args.he, args.cell_type, angles)
+    reconstruction = Reconstruction(args.platform, args.sample, args.he, args.cell_type, angles, var_names, classes)
     reconstruction.load(train_loader, args.epochs, args.lr_reconstructor, train=args.train_reconstructor)
     reconstruction.evaluate(test_loader)
 #    reconstruction.draw_umaps_embedding(palette_type)
     reconstruction.draw_heatmap(cell_types, palette_type)
 
-    classification = Classification(adata, args.platform, args.sample, args.he, args.cell_type, cell_types, angles)
+    classification = Classification(args.platform, args.sample, args.he, args.cell_type, cell_types, angles, var_names, classes)
     classification.load(train_loader, args.epochs, args.lr_classifier, train=args.train_classifier)
     classification.evaluate(test_loader)

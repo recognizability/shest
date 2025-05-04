@@ -22,10 +22,8 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import confusion_matrix, f1_score
 
-from config import seed, set_seed, generator
+from config import seed, set_seed, generator, device
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-#in_features = 768 #output features of ViT or SwinTransformer
 in_features = 1000 #output features of ViT or SwinTransformer
 
 class Encoder(nn.Module):
@@ -43,17 +41,19 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        self.hidden = 2048
-        self.fc1 = nn.Linear(in_features, self.hidden)
-        self.bn1 = nn.BatchNorm1d(self.hidden)
-        self.fc2 = nn.Linear(self.hidden, self.hidden)
-        self.bn2 = nn.BatchNorm1d(self.hidden)
-        self.fc_mu = nn.Linear(self.hidden, out_features)
-        self.fc_alpha = nn.Linear(self.hidden, out_features)
+        hidden = 2048
+        self.bn0 = nn.BatchNorm1d(in_features)
+        self.fc1 = nn.Linear(in_features, hidden)
+        self.bn1 = nn.BatchNorm1d(hidden)
+        self.fc2 = nn.Linear(hidden, hidden)
+        self.bn2 = nn.BatchNorm1d(hidden)
+        self.fc_mu = nn.Linear(hidden, out_features)
+        self.fc_alpha = nn.Linear(hidden, out_features)
 
         self.reset_parameters()
 
     def forward(self, x):
+        x = self.bn0(x)
         x = F.relu(self.bn1(self.fc1(x)))
         x = F.relu(self.bn2(self.fc2(x)))        
         mu = F.softplus(self.fc_mu(x))
@@ -98,10 +98,7 @@ class NegativeBinomialLoss(nn.Module):
        return loss.mean()
 
 class Reconstruction():
-    def __init__(self, adata, platform, sample, he, cell_type, angles):
-        self.adata = adata
-        self.reconstructor = Reconstructor(out_features=adata.shape[1])
-
+    def __init__(self, platform, sample, he, cell_type, angles, var_names, classes):
         self.platform = platform
         self.sample = sample
         self.he = he
@@ -109,12 +106,18 @@ class Reconstruction():
         self.angles = angles
         self.angles_string = '_'.join(map(str, self.angles))
 
+        self.var_names = var_names
+        self.reconstructor = Reconstructor(out_features=len(self.var_names))
+
+        self.classes = classes
+        self.label_encoder = LabelEncoder()
+        self.label_encoder.fit(self.classes)
+
         self.images = None
-        self.cell_labels = None
+        self.labels = None
         self.expressions = None
         self.embeddings = None
         self.reconstructions = None
-        self.cell_labels = None
 
         self.criterion = NegativeBinomialLoss()
 
@@ -133,17 +136,22 @@ class Reconstruction():
             for epoch in range(epochs):
                 self.reconstructor.train()
                 train_loss = 0
-                for cell_id, image in tqdm(train_loader):
+                for cell_id, image, expression, label in tqdm(train_loader):
                     image = image.to(device, non_blocking=True)
-                    expression = torch.as_tensor(
-                        self.adata[cell_id, :].X.toarray(), dtype=torch.float32, device=device
-                    )
+                    expression = expression.to(device, non_blocking=True)
                     
                     embedding = self.reconstructor.encoder(image)
                     if torch.isnan(embedding).any():
-                        print("NaN in embedding")
+                        print("nan found in embedding")
                         sys.exit()
+
                     mu, alpha = self.reconstructor.decoder(embedding)
+                    if torch.isnan(mu).any():
+                        print("nan found in mu")
+                        sys.exit()
+                    if torch.isnan(alpha).any():
+                        print("nan found in alpha")
+                        sys.exit()
 
                     optimizer.zero_grad()
                     loss = self.criterion(mu, alpha, expression)
@@ -182,7 +190,7 @@ class Reconstruction():
         expressions = []
         embeddings = []
         reconstructions = []
-        cell_labels = []
+        labels = []
         
         gc.collect()
         torch.cuda.empty_cache()
@@ -191,13 +199,11 @@ class Reconstruction():
 
         print(f"Evaluating the reconstruction model ...")
         with torch.no_grad():
-            for cell_id, image in tqdm(test_loader):
+            for cell_id, image, expression, label in tqdm(test_loader):
                 image = image.to(device, non_blocking=True)
                 images.append(image.view(image.shape[0], -1).detach().cpu())
 
-                expression = torch.as_tensor(
-                    self.adata[cell_id, :].X.toarray(), dtype=torch.float32, device=device
-                )
+                expression = expression.to(device, non_blocking=True)
                 expressions.append(expression.detach().cpu())
                 
                 embedding = self.reconstructor.encoder(image)
@@ -208,7 +214,7 @@ class Reconstruction():
                 loss = self.criterion(mu, alpha, expression)
                 test_loss += loss.item()
 
-                cell_labels.extend(self.adata[cell_id, :].obs[self.cell_type].values.tolist())
+                labels.extend(label)
 
                 reconstruction = mu
                 reconstructions.append(reconstruction.detach().cpu())
@@ -226,9 +232,10 @@ class Reconstruction():
         self.expressions = expressions
         self.embeddings = embeddings
         self.reconstructions = reconstructions
-        self.cell_labels = cell_labels
 
-        del images, expressions, embeddings, reconstructions, cell_labels
+        self.labels = self.label_encoder.inverse_transform(labels)
+
+        del images, expressions, embeddings, reconstructions, labels
         
         gc.collect()
         torch.cuda.empty_cache()
@@ -261,7 +268,7 @@ class Reconstruction():
         }
 
         fig, ax = plt.subplots(1, len(umaps), figsize=(13, 3))
-        colors = [palette_he[cell_type] for cell_type in self.cell_labels]
+        colors = [palette_he[cell_type] for cell_type in self.labels]
         
         for i, (title, coordinate) in enumerate(umaps.items()):
             ax[i].scatter(coordinate[:, 0], coordinate[:, 1], c=colors, s=1)
@@ -279,13 +286,13 @@ class Reconstruction():
     def draw_heatmap(self, cell_types, palette_he):
         adata_actual = anndata.AnnData(
             X = self.expressions,
-            var = pd.DataFrame(index=self.adata.var_names),
-            obs = pd.DataFrame({self.cell_type: self.cell_labels})
+            var = pd.DataFrame(index=self.var_names),
+            obs = pd.DataFrame({self.cell_type: self.labels})
         )
         adata_reconstruction = anndata.AnnData(
             X = self.reconstructions,
-            var = pd.DataFrame(index=self.adata.var_names),
-            obs = pd.DataFrame({self.cell_type: self.cell_labels})
+            var = pd.DataFrame(index=self.var_names),
+            obs = pd.DataFrame({self.cell_type: self.labels})
         )
 
         fig, ax = plt.subplots(1, 2, figsize=(7, 3))
@@ -329,10 +336,10 @@ class Reconstruction():
         plt.close()
 
 class Classifier(nn.Module):
-    def __init__(self, num_classes, input_dim=in_features):
+    def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        self.bn = nn.BatchNorm1d(input_dim)
-        self.fc = nn.Linear(input_dim, num_classes)
+        self.bn = nn.BatchNorm1d(in_features)
+        self.fc = nn.Linear(in_features, out_features)
         self.reset_parameters()
 
     def forward(self, x):
@@ -351,16 +358,20 @@ class Classifier(nn.Module):
                     nn.init.zeros_(module.bias)
 
 class Classification():
-    def __init__(self, adata, platform, sample, he, cell_type, cell_types, angles):
+    def __init__(self, platform, sample, he, cell_type, cell_types, angles, var_names, classes):
         self.platform = platform
         self.sample = sample
         self.he = he
         self.cell_type = cell_type
-        self.cell_type_encoded = self.cell_type + '_encoded'
         self.angles = angles
         self.angles_string = '_'.join(map(str, self.angles))
+        self.var_names = var_names
+        self.classes = classes
 
-        self.reconstructor = Reconstructor(out_features=adata.shape[1])
+        self.label_encoder = LabelEncoder()
+        self.label_encoder.fit(self.classes)
+
+        self.reconstructor = Reconstructor(out_features=len(self.var_names))
         reconstructor_file = f"/data0/crp/models/reconstructor_{self.platform}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
         self.reconstructor.load_state_dict(torch.load(reconstructor_file, map_location=device))
         self.reconstructor.to(device)
@@ -368,18 +379,8 @@ class Classification():
         self.encoder = self.reconstructor.encoder
         
         self.cell_types = cell_types
-        self.label_encoder = LabelEncoder()
-        if self.cell_type == 'Cell_type' or self.cell_type == 'Cell_type_ST' or self.cell_type == 'Cell_type_HE':
-            self.parameters = list(self.cell_types.keys())
-        elif self.cell_type == 'Cell_subtype_ST':
-            self.parameters =  sum(self.cell_types.values(), [])
-        self.label_encoder.fit(self.parameters)
     
-        self.adata = adata
-        self.adata_local = self.adata[self.adata.obs[self.cell_type].notna(), :].copy()
-        self.adata_local.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata_local.obs[self.cell_type])
-
-        self.classifier = Classifier(num_classes=len(self.parameters))
+        self.classifier = Classifier(out_features=len(self.classes))
         self.classifier.to(device)
 
         self.criterion = nn.CrossEntropyLoss()
@@ -397,13 +398,9 @@ class Classification():
             
                 train_loss = 0
             
-                for cell_id, image in tqdm(train_loader):
+                for cell_id, image, expression, label in tqdm(train_loader):
                     image = image.to(device, non_blocking=True)
-                    cell_label = torch.tensor(
-                        self.adata_local[cell_id, :].obs[self.cell_type_encoded].values,
-                        dtype=torch.long,
-                        device=device
-                    )
+                    label = label.to(device, non_blocking=True)
             
                     with torch.no_grad():  
                         embedding = self.encoder(image)
@@ -411,13 +408,13 @@ class Classification():
                     logit = self.classifier(embedding)
                     
                     optimizer.zero_grad()
-                    loss = self.criterion(logit, cell_label)
+                    loss = self.criterion(logit, label)
                     loss.backward()
                     optimizer.step()
             
                     train_loss += loss.item()
 
-                    del image, cell_label
+                    del image, label
             
                 average_loss = train_loss / len(train_loader)
                 print(f"Epoch: {epoch+1}/{epochs}, Loss: {average_loss:.4f}")
@@ -442,52 +439,48 @@ class Classification():
     def evaluate(self, test_loader):
         self.classifier.eval()
         
-        cell_labels = []
-        cell_predictions = []
+        labels = []
+        predictions = []
         
         test_loss = 0
 
         print(f"Evaluating the {self.cell_type} prediction model ...")
         with torch.no_grad():
-            for cell_id, image in tqdm(test_loader):
+            for cell_id, image, expression, label in tqdm(test_loader):
                 image = image.to(device, non_blocking=True)
-                cell_label = torch.tensor(
-                    self.adata_local[cell_id, :].obs[self.cell_type_encoded].values,
-                    dtype=torch.long,
-                    device=device
-                )
-                cell_labels.append(cell_label.detach().cpu())
+                label = label.to(device, non_blocking=True)
+                labels.append(label.detach().cpu())
         
                 embedding = self.encoder(image)
         
                 logit = self.classifier(embedding)
-                loss = self.criterion(logit, cell_label)
+                loss = self.criterion(logit, label)
                 test_loss += loss.item()
                 
-                cell_prediction = torch.argmax(logit, dim=1)
-                cell_predictions.append(cell_prediction.detach().cpu())
+                prediction = torch.argmax(logit, dim=1)
+                predictions.append(prediction.detach().cpu())
 
-                del cell_label, cell_prediction
+                del label, prediction
 
         print(f"Test Loss: {test_loss / len(test_loader):.4f}")
         
-        cell_labels = torch.cat(cell_labels).numpy()
-        cell_predictions = torch.cat(cell_predictions).numpy()
+        labels = torch.cat(labels).numpy()
+        predictions = torch.cat(predictions).numpy()
         
-        cell_labels = self.label_encoder.inverse_transform(cell_labels)
-        cell_predictions = self.label_encoder.inverse_transform(cell_predictions)
+        labels = self.label_encoder.inverse_transform(labels)
+        predictions = self.label_encoder.inverse_transform(predictions)
             
         gc.collect()
         torch.cuda.empty_cache()
 
-        f1 = f1_score(cell_labels, cell_predictions, average='weighted')
+        f1 = f1_score(labels, predictions, average='weighted')
         print('Average F1 score', f1)
     
-        cm = confusion_matrix(cell_labels, cell_predictions, labels=self.parameters)
-        del cell_labels, cell_predictions
+        cm = confusion_matrix(labels, predictions, labels=self.classes)
+        del labels, predictions
         
-        plt.figure(figsize=(len(self.parameters)//2+2, len(self.parameters)//2))
-        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.parameters, yticklabels=self.parameters)
+        plt.figure(figsize=(len(self.classes)//2+2, len(self.classes)//2))
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes)
         plt.title(f"{self.cell_type} (f1={f1:.4f})") 
         plt.xlabel('Prediction') 
         plt.ylabel('Label')
@@ -498,7 +491,7 @@ class Classification():
     def infer(self, inference_loader):
         self.classifier.eval()
         
-        cell_predictions = []
+        predictions = []
         
         print(f"Inferring with the {self.cell_type} prediction model ...")
         with torch.no_grad():
@@ -506,14 +499,13 @@ class Classification():
                 image = image.to(device, non_blocking=True)
                 embedding = self.encoder(image)
                 logit = self.classifier(embedding)
-                cell_prediction = torch.argmax(logit, dim=1)
-                cell_predictions.append(cell_prediction)
+                prediction = torch.argmax(logit, dim=1)
+                predictions.append(prediction.detach().cpu())
 
-        
-        cell_predictions = torch.cat(cell_predictions).detach().cpu().numpy()
-        cell_predictions = self.label_encoder.inverse_transform(cell_predictions)
+        predictions = torch.cat(predictions).numpy()
+        predictions = self.label_encoder.inverse_transform(predictions)
             
         gc.collect()
         torch.cuda.empty_cache()
 
-        return cell_predictions
+        return predictions

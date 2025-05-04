@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import anndata
+from sklearn.preprocessing import LabelEncoder
 
 import tacco as tc
 import torch
@@ -24,43 +25,14 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from config import n_cores, seed, set_seed, generator
+from config import n_cores, seed, set_seed, generator, device
 
 sc.settings.n_jobs = n_cores
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
-#    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 ])
-
-class HEDataset(Dataset):
-    def __init__(self, cell_ids, directory, platform, sample, he, cell_type, angles):
-        self.cell_ids = cell_ids
-        self.directory = directory
-        self.platform = platform
-        self.sample = sample
-        self.he = he
-        self.cell_type = cell_type
-        self.angles = angles
-
-    def __len__(self):
-        return len(self.cell_ids) * len(self.angles)
-
-    def __getitem__(self, i):
-        base_i = i // len(self.angles)
-        angle_i = i % len(self.angles)
-
-        cell_id = self.cell_ids[base_i]
-        angle = self.angles[angle_i]
-
-        image_path = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type, f'{cell_id}.png')
-        image = cv2.imread(image_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray(image)
-        image = transforms.functional.rotate(image, angle)
-        image = transform(image)
-        return cell_id, image
 
 def preprocessing(adata):
     adata.var_names_make_unique()
@@ -73,13 +45,15 @@ def preprocessing(adata):
     return adata
 
 class PairedDataset():
-    def __init__(self, directory, platform, sample, he, cell_type, cell_types):
+    def __init__(self, directory, platform, sample, he, cell_type, cell_types, angles):
         self.directory = directory
         self.platform = platform
         self.sample = sample
         self.he = he
         self.cell_type = cell_type
         self.cell_types = cell_types
+        self.angles = angles
+
         self.palette_type = dict(zip(
             self.cell_types.keys(), 
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(cell_types.keys())).as_hex()
@@ -90,29 +64,63 @@ class PairedDataset():
             sns.color_palette('blend:red,orange,green,blue', n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
-        cells_path = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type, '*.png')
-        self.image_ids = [cell.split('/')[-1].split('.')[0] for cell in glob(cells_path)]
-        print(len(self.image_ids), "images of the cells are prepared.")
-        self.dataloader = None
+        image_dir = os.path.join(self.directory, self.platform, self.sample, self.he, self.cell_type)
+        image_files = glob(os.path.join(image_dir, '*.png'))
+        image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
+        print(len(image_ids), "images of the cells are prepared.")
 
-        self.adata = None
-        self.type_ids = None
-        self.common_ids = None
-
-    def cell_select(self, force=False):
+        self.label_encoder = LabelEncoder()
+        if self.cell_type == 'Cell_type' or self.cell_type == 'Cell_type_ST' or self.cell_type == 'Cell_type_HE':
+            self.parameters = list(self.cell_types.keys())
+        elif self.cell_type == 'Cell_subtype_ST':
+            self.parameters =  sum(self.cell_types.values(), [])
+        self.label_encoder.fit(self.parameters)
+        self.classes = self.label_encoder.classes_
+    
         print('Expression profile and their cell types loading ... ', end='')
         adata_file = f'{self.directory}{self.platform}/{self.sample}/annotation/adata_{self.he}.h5ad'
-        self.adata = sc.read_h5ad(adata_file)
-        print(self.adata.shape)
-        
-        self.type_ids = self.adata[self.adata.obs[self.cell_type].notna(), :].obs.index
-        print(len(self.type_ids), "of annotated cells are loaded.")
-        print(self.adata.obs[self.cell_type].value_counts())
-        self.common_ids = list(set(self.image_ids) & set(self.type_ids))
-        self.common_ids.sort()
-        print('Common', len(self.common_ids), "cells are selected.")
+        adata_raw = sc.read_h5ad(adata_file)
+        print(adata_raw.shape)
+        type_ids = adata_raw.obs[self.cell_type].dropna().index.tolist()
+        print(len(type_ids), "of annotated cells are loaded.")
 
-        return self.adata
+        self.cell_ids = sorted(list(set(image_ids) & set(type_ids)))
+        print('Common', len(self.cell_ids), "cells are selected.")
+
+        self.image_files = pd.Series(self.cell_ids, index=self.cell_ids).apply(
+            lambda file: os.path.join(image_dir, f"{file}.png")
+        ).to_dict()
+
+        self.adata = adata_raw[self.cell_ids, :].copy()
+        print(self.adata.obs[self.cell_type].value_counts())
+        self.cell_type_encoded = self.cell_type + '_encoded'
+        self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
+        self.var_names = self.adata.var_names.tolist()
+
+        cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
+        self.expressions = self.adata.X[cell_indices].toarray().astype(np.float32)
+        self.labels = self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64)
+
+    def __len__(self):
+        return len(self.cell_ids) * len(self.angles)
+
+    def __getitem__(self, i):
+        base_i = i // len(self.angles)
+        angle_i = i % len(self.angles)
+
+        cell_id = self.cell_ids[base_i]
+        angle = self.angles[angle_i]
+
+        image = cv2.imread(self.image_files[cell_id])
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
+        image = transforms.functional.rotate(image, angle)
+        image = transform(image)
+
+        expression = torch.from_numpy(self.expressions[base_i])
+        label = torch.tensor(self.labels[base_i], dtype=torch.long)
+
+        return cell_id, image, expression, label
 
     def draw_umaps_expression(self):
         fig, ax = plt.subplots(3, 2, figsize=(7, 9))
@@ -145,12 +153,12 @@ class PairedDataset():
         fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.sample}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
-    def loaders(self, batch_size, angles):
-        full_dataset = HEDataset(self.common_ids, self.directory, self.platform, self.sample, self.he, self.cell_type, angles=angles)
-        train_size = int(0.8 * len(self.common_ids))
-        test_size = len(self.common_ids) - train_size
-        train_dataset, test_dataset = random_split(full_dataset, [train_size*len(angles), test_size*len(angles)], generator=generator)
-        print(f'The training dataset size is {len(train_dataset)}, and the test dataset size is {len(test_dataset)}.')
+    def get_dataloaders(self, batch_size, split=0.8):
+        total = len(self)
+        train_size = int(split * total)
+        test_size = total - train_size
+        train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
+        print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True) 
-        return train_loader, test_loader
+        test_loader = DataLoader(test_dateset, batch_size=batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+        return self.var_names, self.classes, train_loader, test_loader
