@@ -33,7 +33,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from config import n_cores, seed, set_seed, generator, device
+from .config import n_cores, seed, set_seed, generator, device
 
 sc.settings.n_jobs = n_cores
 
@@ -57,9 +57,6 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.platform = args.platform
-        self.source = args.source
-        self.sample = args.sample
         self.he = args.he
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
@@ -145,15 +142,19 @@ class Dataset():
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
-    def get(self, split=0.8):
+    def loader(self, split=0.8):
         total = len(self)
-        train_size = int(split * total)
-        test_size = total - train_size
-        train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
-        print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
-        test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
-        return self.genes, self.classes, train_loader, test_loader
+        if split==1 or split==0:
+            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+            return data_loader
+        else:
+            train_size = int(split * total)
+            test_size = total - train_size
+            train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
+            print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+            return train_loader, test_loader
 
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16"):
@@ -252,9 +253,6 @@ class NegativeBinomialLoss(nn.Module):
 class Modeling():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.platform = args.platform
-        self.source = args.source
-        self.sample = args.sample
         self.stem_file = config.stem_file
         self.he = args.he
         self.cell_type = args.cell_type
@@ -265,7 +263,9 @@ class Modeling():
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
-        self.genes, self.classes, self.train_loader, self.test_loader = dataset.get()
+        self.genes = dataset.genes
+        self.classes = dataset.classes
+        self.train_loader, self.test_loader = dataset.loader()
         self.n_genes = len(self.genes)
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)

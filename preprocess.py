@@ -19,22 +19,19 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from config import n_cores, seed, set_seed
+from .config import n_cores, seed, set_seed
 
 sc.settings.n_jobs = n_cores
 
 class Preprocessing():
     def __init__(self, args, config):
         self.raw_directory = args.raw_directory
+        self.stem_file = config.stem_file
         self.directory = args.directory
-        self.platform = args.platform
-        self.source = args.source
-        self.sample = args.sample
         self.force_annotate = args.force_annotate
         self.force_categorize = args.force_categorize
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
-        self.stem_file = config.stem_file
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower_bound = int(4 // self.pixel_size) #micrometer/(micrometer/pixel)
