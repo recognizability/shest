@@ -68,34 +68,15 @@ cell_types = {
              'NK cell',
              'NK cell dividing',
         ],
-#        'Other': [
-#            'Tumor cells LUSC',
-#            'Tumor cells LUSC mitotic',
-#            'Tumor cells NSCLC mixed',
-#            'Alveolar cell type 1',
-#            'Alveolar cell type 2',
-#            'transitional club/AT2',
-#            'Ciliated',
-#            'Club',
-#            'Macrophage',
-#            'Macrophage alveolar',
-#            'Mast cell',
-#            'Monocyte classical',
-#            'Monocyte non-classical',
-#            'Neutrophils',
-#            'DC mature',
-#            'cDC1',
-#            'cDC2',
-#            'pDC',
-#            'ROS1+ healthy epithelial',
-#            'myeloid dividing',
-#        ],
-    }
+    },
 }
 
 class Config:
     def __init__(self, args):
-        self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {})
+        self.stem_directory = f"{args.platform}/{args.source}/{args.sample}/"
+        self.stem_file = f"{args.platform}_{args.source}_{args.sample}"
+
+        self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
         palette = 'blend:red,orange,green,blue'

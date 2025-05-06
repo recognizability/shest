@@ -23,8 +23,9 @@ from config import n_cores, seed, set_seed
 
 sc.settings.n_jobs = n_cores
 
-class Preprocess():
+class Preprocessing():
     def __init__(self, args, config):
+        self.raw_directory = args.raw_directory
         self.directory = args.directory
         self.platform = args.platform
         self.source = args.source
@@ -33,20 +34,20 @@ class Preprocess():
         self.force_categorize = args.force_categorize
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
+        self.stem_file = config.stem_file
 
-        raw_path = f"/data0/{self.platform}/{self.source}/{self.sample}/"
-        self.pixel_size = json.load(open(raw_path + "experiment.xenium"))['pixel_size'] # micrometers per pixel
+        self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower_bound = int(4 // self.pixel_size) #micrometer/(micrometer/pixel)
         self.upper_bound = int(18 // self.pixel_size) #micrometer/(micrometer/pixel)
         self.crop_size = self.upper_bound
 
-        self.sdata = self._prepare_sdata(raw_path)
+        self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.cell_boundaries = self.sdata.shapes["cell_boundaries"]
         self.adata = self.sdata.tables['table']
 
-        self.processed_path = self.directory + f"{self.platform}/{self.source}/{self.sample}/"
-        os.makedirs(self.processed_path, exist_ok=True)
+        self.processing_directory = self.directory + 'dataset/' + config.stem_directory
+        os.makedirs(self.processing_directory, exist_ok=True)
 
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape #(c, y, x)
@@ -75,7 +76,7 @@ class Preprocess():
     def _single_cell_reference(self):
         if self.organ == 'Lung':
             print("Loading LuCA single cell reference ... ", end='')
-            ref = sc.read_h5ad('/data0/cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
+            ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
             ref.index = ref.var.feature_name
             ref.var.index = ref.var.feature_name
             ref = ref[ref.obs['platform']!='Smart-seq2'].copy()
@@ -83,14 +84,14 @@ class Preprocess():
         return ref
 
     def annotation(self, cell_subtype='cell_type_tumor'):
-        he_annotation = pd.read_csv(self.processed_path + f"annotation/merged_output.csv")
+        he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv")
         he_annotation = he_annotation.set_index("cell_id")[["group"]]
-        he_annotation.to_csv(self.processed_path + "annotation/he_annotation.csv")
+        he_annotation.to_csv(self.processing_directory + "annotation/he_annotation.csv")
         he_annotation['Cell_type_HE'] = he_annotation['group'].astype(str)
         print(f"{he_annotation.shape[0]} cells are annotated by thier morphologies.")
         
-        sc_annotation_csv = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.csv'
-        sc_annotation_h5ad = self.processed_path + f'annotation/sc_annotation_{cell_subtype}.h5ad'
+        sc_annotation_csv = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.csv'
+        sc_annotation_h5ad = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.h5ad'
         if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)) or self.force_annotate:
             ref = self._single_cell_reference()
             print('Annotating types of the cells ... ')
@@ -113,7 +114,7 @@ class Preprocess():
         else: 
             self.adata = sc.read_h5ad(sc_annotation_h5ad)
 
-            adata_file = self.processed_path + f'annotation/adata_he{self.crop_size}.h5ad'
+            adata_file = self.processing_directory + f'annotation/adata_he{self.crop_size}.h5ad'
             if not os.path.exists(adata_file) or self.force_categorize:
                 self.adata.obs.index = self.adata.obs['cell_id']
                 self.adata.obs['Cell_subtype_ST'] = self.adata.obs[cell_subtype]
@@ -134,20 +135,20 @@ class Preprocess():
     def cell_area_filter(self):
         bounds = self.cell_boundaries.bounds
         len_raw = len(bounds)
-        bounds = bounds / self.pixel_size
+        bounds = bounds / self.pixel_size #in pixel
         bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
         bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
         bounds = bounds.merge(self.adata.obs['Cell_type'], how='left', left_index=True, right_index=True)
         bounds_melted = bounds.melt(id_vars='Cell_type', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
-        bounds_melted["Length_(μm)"] *= self.pixel_size
+        bounds_melted["Length_(μm)"] *= self.pixel_size #in micrometer
 
 
         fig = plt.figure(figsize=(4, 4))
         sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type', hue='Length', split=True, inner='quart')
-        plt.axvline(x=self.upper_bound*self.pixel_size, linestyle='--', color='gray')
-        plt.axvline(x=self.lower_bound*self.pixel_size, linestyle='--', color='gray')
+        plt.axvline(x=self.upper_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
+        plt.axvline(x=self.lower_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/violinplot_{self.platform}_{self.source}_{self.sample}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/violinplot_{self.stem_file}.png", bbox_inches="tight")
         plt.close(fig)
         
         self.filtered_cell_ids = bounds[
@@ -190,8 +191,8 @@ class Preprocess():
             cropped_image = Image.fromarray(cropped_image)
             cropped_image.save(self.image_path + f"{cell_id}.png")
         
-    def crop_cells(self):
-        self.image_path = self.processed_path + f'he{self.crop_size}/{self.cell_type}/'
+    def crop_the_common_cells(self):
+        self.image_path = self.processing_directory + f'he{self.crop_size}/{self.cell_type}/'
         os.makedirs(self.image_path, exist_ok=True)
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
         print(f'{len(self.cell_ids)} cells are been preparing in {self.image_path} directory for modeling')

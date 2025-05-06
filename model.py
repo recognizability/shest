@@ -54,7 +54,7 @@ def preprocessing(adata):
 
     return adata
 
-class PairedDataset():
+class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
         self.platform = args.platform
@@ -68,10 +68,11 @@ class PairedDataset():
         self.palette_subtype = config.palette_subtype
         self.batch_size = args.batch_size
         self.angles = config.angles
+        self.stem_file = config.stem_file
 
-        base_dir = os.path.join(self.directory, self.platform, self.source, self.sample)
-        image_dir = os.path.join(base_dir, self.he, self.cell_type)
-        image_files = glob(os.path.join(image_dir, '*.png'))
+        processing_directory = self.directory + 'dataset/' + config.stem_directory
+        image_directory = os.path.join(processing_directory, self.he, self.cell_type)
+        image_files = glob(os.path.join(image_directory, '*.png'))
         image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
         print(len(image_ids), "images of the cells are prepared.")
 
@@ -85,7 +86,7 @@ class PairedDataset():
         self.classes = self.label_encoder.classes_
     
         print('Expression profile and their cell types loading ... ', end='')
-        adata_file = os.path.join(base_dir, f'annotation/adata_{self.he}.h5ad')
+        adata_file = os.path.join(processing_directory, f'annotation/adata_{self.he}.h5ad')
         self.adata_raw = sc.read_h5ad(adata_file)
         print(self.adata_raw.shape)
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
@@ -95,7 +96,7 @@ class PairedDataset():
         print('Common', len(self.cell_ids), "cells are selected.")
 
         self.image_files = pd.Series(self.cell_ids, index=self.cell_ids).apply(
-            lambda file: os.path.join(image_dir, f"{file}.png")
+            lambda file: os.path.join(image_directory, f"{file}.png")
         ).to_dict()
 
         self.adata = self.adata_raw[self.cell_ids, :].copy()
@@ -140,9 +141,8 @@ class PairedDataset():
                ax=ax[i][0]
             )
             sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
-
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.source}_{self.sample}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.he}.png", bbox_inches="tight")
         plt.close()
 
     def get(self, split=0.8):
@@ -162,7 +162,7 @@ class Encoder(nn.Module):
         for param in self.encoder.parameters():
             param.requires_grad = False
         for param in self.encoder.heads.parameters():
-            param.requires_grad = True
+            param.requires_grad = True #for only the last heads
 
     def forward(self, x):
         return self.encoder(x)
@@ -251,9 +251,11 @@ class NegativeBinomialLoss(nn.Module):
 
 class Modeling():
     def __init__(self, args, config):
+        self.directory = args.directory
         self.platform = args.platform
         self.source = args.source
         self.sample = args.sample
+        self.stem_file = config.stem_file
         self.he = args.he
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
@@ -264,9 +266,9 @@ class Modeling():
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
 
-        paired_dataset = PairedDataset(args, config)
-        paired_dataset.draw_umaps_expression()
-        self.genes, self.classes, self.train_loader, self.test_loader = paired_dataset.get()
+        dataset = Dataset(args, config)
+        dataset.draw_umaps_expression()
+        self.genes, self.classes, self.train_loader, self.test_loader = dataset.get()
         self.n_genes = len(self.genes)
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)
@@ -288,7 +290,7 @@ class Modeling():
         self.load()
 
     def load(self):
-        model_file = f"/data0/crp/models/model_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
+        model_file = self.directory + f"models/model_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
         if not os.path.isfile(model_file) or self.train:
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
@@ -453,7 +455,7 @@ class Modeling():
         plt.legend(markers, self.palette_type.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self):
@@ -505,7 +507,7 @@ class Modeling():
         ax[1].set_title("Reconstructed")
 
         plt.tight_layout()
-        plt.savefig(f"/data0/crp/results/expression_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png")
+        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
@@ -520,7 +522,7 @@ class Modeling():
         plt.xlabel('Prediction')
         plt.ylabel('Label')
 
-        plt.savefig(f"/data0/crp/results/confusion_matrix_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
     def infer(self, inference_loader):
