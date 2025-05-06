@@ -3,6 +3,7 @@ import random
 import numpy as np
 import torch
 import multiprocessing as mp
+import seaborn as sns
 
 n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
@@ -24,68 +25,87 @@ def set_seed(seed=seed):
     torch.use_deterministic_algorithms(True)
 
 
-cell_types_lung = {
-    'Tumor_cell_LUAD': [
-        'Tumor cells LUAD',
-        'Tumor cells LUAD EMT',
-        'Tumor cells LUAD MSLN',
-        'Tumor cells LUAD NE',
-        'Tumor cells LUAD mitotic',
-    ],
-    'Stromal_cell': [
-        'stromal dividing',
-        'Fibroblast adventitial',
-        'Fibroblast alveolar',
-        'Fibroblast peribronchial',
-        'Smooth muscle cell',
-        'Mesothelial',
-    ],
-    'Pericyte': [
-        'Pericyte',
-    ],
-    'Endothelial_cell': [
-        'Endothelial cell arterial',
-        'Endothelial cell capillary',
-        'Endothelial cell lymphatic',
-        'Endothelial cell venous',
-    ],
-    'Lymphocyte': [
-         'B cell',
-         'B cell dividing',
-         'Plasma cell',
-         'Plasma cell dividing',
-         'T cell regulatory',
-         'T cell CD4',
-         'T cell CD4 dividing',
-         'T cell CD8 activated',
-         'T cell CD8 dividing',
-         'T cell CD8 effector memory',
-         'T cell CD8 naive',
-         'T cell CD8 terminally exhausted',
-         'T cell NK-like',
-         'NK cell',
-         'NK cell dividing',
-    ],
-#    'Other': [
-#        'Tumor cells LUSC',
-#        'Tumor cells LUSC mitotic',
-#        'Tumor cells NSCLC mixed',
-#        'Alveolar cell type 1',
-#        'Alveolar cell type 2',
-#        'transitional club/AT2',
-#        'Ciliated',
-#        'Club',
-#        'Macrophage',
-#        'Macrophage alveolar',
-#        'Mast cell',
-#        'Monocyte classical',
-#        'Monocyte non-classical',
-#        'Neutrophils',
-#        'DC mature',
-#        'cDC1',
-#        'cDC2',
-#        'pDC',
-#        'ROS1+ healthy epithelial',
-#        'myeloid dividing',
-#    ],
+cell_types = {
+    'lung':{
+        'Tumor_cell_LUAD': [
+            'Tumor cells LUAD',
+            'Tumor cells LUAD EMT',
+            'Tumor cells LUAD MSLN',
+            'Tumor cells LUAD NE',
+            'Tumor cells LUAD mitotic',
+        ],
+        'Stromal_cell': [
+            'stromal dividing',
+            'Fibroblast adventitial',
+            'Fibroblast alveolar',
+            'Fibroblast peribronchial',
+            'Smooth muscle cell',
+            'Mesothelial',
+        ],
+        'Pericyte': [
+            'Pericyte',
+        ],
+        'Endothelial_cell': [
+            'Endothelial cell arterial',
+            'Endothelial cell capillary',
+            'Endothelial cell lymphatic',
+            'Endothelial cell venous',
+        ],
+        'Lymphocyte': [
+             'B cell',
+             'B cell dividing',
+             'Plasma cell',
+             'Plasma cell dividing',
+             'T cell regulatory',
+             'T cell CD4',
+             'T cell CD4 dividing',
+             'T cell CD8 activated',
+             'T cell CD8 dividing',
+             'T cell CD8 effector memory',
+             'T cell CD8 naive',
+             'T cell CD8 terminally exhausted',
+             'T cell NK-like',
+             'NK cell',
+             'NK cell dividing',
+        ],
+#        'Other': [
+#            'Tumor cells LUSC',
+#            'Tumor cells LUSC mitotic',
+#            'Tumor cells NSCLC mixed',
+#            'Alveolar cell type 1',
+#            'Alveolar cell type 2',
+#            'transitional club/AT2',
+#            'Ciliated',
+#            'Club',
+#            'Macrophage',
+#            'Macrophage alveolar',
+#            'Mast cell',
+#            'Monocyte classical',
+#            'Monocyte non-classical',
+#            'Neutrophils',
+#            'DC mature',
+#            'cDC1',
+#            'cDC2',
+#            'pDC',
+#            'ROS1+ healthy epithelial',
+#            'myeloid dividing',
+#        ],
+    }
 }
+
+class Config:
+    def __init__(self, args):
+        self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {})
+        self.cell_subtypes = sum(self.cell_types.values(), [])
+
+        palette = 'blend:red,orange,green,blue'
+        self.palette_type = dict(zip(
+            self.cell_types.keys(),
+            sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()
+        ))
+        self.palette_subtype = dict(zip(
+            self.cell_subtypes,
+            sns.color_palette(palette, n_colors=len(self.cell_subtypes)).as_hex()
+        ))
+
+        self.angles = [0, 90, 180, 270] if args.rotate else [0]

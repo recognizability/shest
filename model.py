@@ -1,32 +1,159 @@
 import os
+os.environ["PARAMETRICUMAP"] = "0"
+os.environ["UMAP_DISABLE_PARAMETRIC"] = "True"
+
 import sys
 import gc
+from glob import glob
+from collections import Counter
 from tqdm import tqdm
+from tqdm.contrib.concurrent import thread_map
 
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics import confusion_matrix, f1_score
+from umap import UMAP
+
 import anndata
 import scanpy as sc
+import tacco as tc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import NegativeBinomial
+from torch.utils.data import DataLoader, random_split
+
+import cv2
+from PIL import Image
+import torchvision.transforms as transforms
 import torchvision.models as models
-
-from umap import UMAP
-from sklearn.preprocessing import StandardScaler
-from tqdm.contrib.concurrent import thread_map
-
+import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import confusion_matrix, f1_score
-
 from config import n_cores, seed, set_seed, generator, device
 
+sc.settings.n_jobs = n_cores
+
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
+
 in_features = 1000 #output features of ViT or SwinTransformer
+
+def preprocessing(adata):
+    adata.var_names_make_unique()
+    adata.obs_names_make_unique()
+    
+    adata.var['mt'] = adata.var_names.str.startswith('MT-')
+    sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
+    adata = adata[adata.obs.pct_counts_mt < 5, :].copy()
+
+    return adata
+
+class PairedDataset():
+    def __init__(self, args, config):
+        self.directory = args.directory
+        self.platform = args.platform
+        self.source = args.source
+        self.sample = args.sample
+        self.he = args.he
+        self.cell_type = args.cell_type
+        self.cell_types = config.cell_types
+        self.cell_subtypes = config.cell_subtypes
+        self.palette_type = config.palette_type
+        self.palette_subtype = config.palette_subtype
+        self.batch_size = args.batch_size
+        self.angles = config.angles
+
+        base_dir = os.path.join(self.directory, self.platform, self.source, self.sample)
+        image_dir = os.path.join(base_dir, self.he, self.cell_type)
+        image_files = glob(os.path.join(image_dir, '*.png'))
+        image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
+        print(len(image_ids), "images of the cells are prepared.")
+
+        self.label_encoder = LabelEncoder()
+        if self.cell_type == 'Cell_type' or self.cell_type == 'Cell_type_ST' or self.cell_type == 'Cell_type_HE':
+            self.parameters = list(self.cell_types.keys())
+        elif self.cell_type == 'Cell_subtype_ST':
+            self.parameters =  self.cell_subtypes
+        self.label_encoder.fit(self.parameters)
+        self.label_encoder.classes_ = np.array(self.parameters)
+        self.classes = self.label_encoder.classes_
+    
+        print('Expression profile and their cell types loading ... ', end='')
+        adata_file = os.path.join(base_dir, f'annotation/adata_{self.he}.h5ad')
+        self.adata_raw = sc.read_h5ad(adata_file)
+        print(self.adata_raw.shape)
+        type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
+        print(len(type_ids), "of annotated cells are loaded.")
+
+        self.cell_ids = sorted(list(set(image_ids) & set(type_ids)))
+        print('Common', len(self.cell_ids), "cells are selected.")
+
+        self.image_files = pd.Series(self.cell_ids, index=self.cell_ids).apply(
+            lambda file: os.path.join(image_dir, f"{file}.png")
+        ).to_dict()
+
+        self.adata = self.adata_raw[self.cell_ids, :].copy()
+        print(self.adata.obs[self.cell_type].value_counts())
+        self.cell_type_encoded = self.cell_type + '_encoded'
+        self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
+        self.genes = self.adata.var_names.tolist()
+
+        cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
+        self.expressions = self.adata.X[cell_indices].toarray().astype(np.float32)
+        self.labels = self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64)
+
+    def __len__(self):
+        return len(self.cell_ids) * len(self.angles)
+
+    def __getitem__(self, i):
+        base_i = i // len(self.angles)
+        angle_i = i % len(self.angles)
+
+        cell_id = self.cell_ids[base_i]
+        angle = self.angles[angle_i]
+
+        image = cv2.imread(self.image_files[cell_id])
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image = Image.fromarray(image)
+        image = transforms.functional.rotate(image, angle)
+        image = transform(image)
+
+        expression = torch.from_numpy(self.expressions[base_i])
+        label = torch.tensor(self.labels[base_i], dtype=torch.long)
+
+        return cell_id, image, expression, label
+
+    def draw_umaps_expression(self):
+        fig, ax = plt.subplots(3, 2, figsize=(7, 9))
+        for i, cell_type in enumerate(['Cell_type_ST', 'Cell_type_HE', 'Cell_type']):
+            cell_types = self.adata_raw.obs[cell_type].value_counts().index.tolist()
+            sns.barplot(
+               pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
+               orient = 'h',
+               palette = self.palette_type,
+               ax=ax[i][0]
+            )
+            sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
+
+        fig.tight_layout()
+        fig.savefig(f"/data0/crp/results/umaps_expression_{self.platform}_{self.source}_{self.sample}_{self.he}.png", bbox_inches="tight")
+        plt.close()
+
+    def get(self, split=0.8):
+        total = len(self)
+        train_size = int(split * total)
+        test_size = total - train_size
+        train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
+        print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+        test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+        return self.genes, self.classes, train_loader, test_loader
 
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16"):
@@ -123,22 +250,27 @@ class NegativeBinomialLoss(nn.Module):
        return loss.mean()
 
 class Modeling():
-    def __init__(self, platform, source, sample, he, cell_type, cell_types, angles, var_names, classes):
-        self.platform = platform
-        self.source = source
-        self.sample = sample
-        self.he = he
-        self.cell_type = cell_type
-        self.cell_types = cell_types
-        self.angles = angles
+    def __init__(self, args, config):
+        self.platform = args.platform
+        self.source = args.source
+        self.sample = args.sample
+        self.he = args.he
+        self.cell_type = args.cell_type
+        self.cell_types = config.cell_types
+        self.palette_type = config.palette_type
+        self.epochs = args.epochs
+        self.lr = args.lr
+        self.train = args.train
+        self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
 
-        self.var_names = var_names
-        self.n_genes = len(self.var_names)
-        self.classes = classes
+        paired_dataset = PairedDataset(args, config)
+        paired_dataset.draw_umaps_expression()
+        self.genes, self.classes, self.train_loader, self.test_loader = paired_dataset.get()
+        self.n_genes = len(self.genes)
         self.label_encoder = LabelEncoder()
         self.label_encoder.fit(self.classes)
-        self.n_classes = len(classes)
+        self.n_classes = len(self.classes)
 
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
@@ -153,22 +285,24 @@ class Modeling():
         self.criterion_reconstruction = NegativeBinomialLoss()
         self.criterion_classification = nn.CrossEntropyLoss()
 
-    def load(self, train_loader, epochs, lr, train=False):
+        self.load()
+
+    def load(self):
         model_file = f"/data0/crp/models/model_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
-        if not os.path.isfile(model_file) or train:
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=1e-4)
+        if not os.path.isfile(model_file) or self.train:
+            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
             gc.collect()
             torch.cuda.empty_cache()
             
             print(f"Training the model ...")
             escape = False
-            for epoch in range(epochs):
+            for epoch in range(self.epochs):
                 self.model.train()
                 train_loss_reconstruction = 0
                 train_loss_classification = 0
 
-                for cell_id, image, expression, label in tqdm(train_loader):
+                for cell_id, image, expression, label in tqdm(self.train_loader):
                     image = image.to(device, non_blocking=True)
                     expression = expression.to(device, non_blocking=True)
                     label = label.to(device, non_blocking=True)
@@ -208,9 +342,9 @@ class Modeling():
                 if escape:
                     break
 
-                average_loss_reconstruction = train_loss_reconstruction / len(train_loader)
-                average_loss_classification = train_loss_classification / len(train_loader)
-                print(f"Epoch: {epoch+1}/{epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
+                average_loss_reconstruction = train_loss_reconstruction / len(self.train_loader)
+                average_loss_classification = train_loss_classification / len(self.train_loader)
+                print(f"Epoch: {epoch+1}/{self.epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
 
                 torch.save(self.model.state_dict(), model_file)
 
@@ -220,7 +354,7 @@ class Modeling():
         else: 
             self.model.load_state_dict(torch.load(model_file, map_location=device))
 
-    def evaluate(self, test_loader):
+    def evaluate(self):
         self.model.eval()
 
         images = [] 
@@ -238,7 +372,7 @@ class Modeling():
 
         print(f"Evaluating the model ...")
         with torch.no_grad():
-            for cell_id, image, expression, label in tqdm(test_loader):
+            for cell_id, image, expression, label in tqdm(self.test_loader):
                 image = image.to(device, non_blocking=True)
                 expression = expression.to(device, non_blocking=True)
                 label = label.to(device, non_blocking=True)
@@ -264,8 +398,8 @@ class Modeling():
 
                 del image, expression, label, embedding, mu, alpha, logit, reconstruction, prediction
                 
-        print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(test_loader):.5f}")
-        print(f"Test Loss of classification: {test_loss_classification / len(test_loader):.5f}")
+        print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(self.test_loader):.5f}")
+        print(f"Test Loss of classification: {test_loss_classification / len(self.test_loader):.5f}")
 
         self.images = torch.cat(images).numpy()
         self.expressions = torch.cat(expressions).numpy()
@@ -283,7 +417,7 @@ class Modeling():
         gc.collect()
         torch.cuda.empty_cache()
 
-    def draw_umaps_embedding(self, palette_he):
+    def draw_umaps_embedding(self):
         print("Standardizing ... ", end='')
         images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled = thread_map(
             lambda x: StandardScaler().fit_transform(x), 
@@ -307,7 +441,7 @@ class Modeling():
         }
 
         fig, ax = plt.subplots(1, len(umaps), figsize=(13, 3))
-        colors = [palette_he[cell_type] for cell_type in self.labels]
+        colors = [self.palette_type[cell_type] for cell_type in self.labels]
         
         for i, (title, coordinate) in enumerate(umaps.items()):
             ax[i].scatter(coordinate[:, 0], coordinate[:, 1], c=colors, s=1)
@@ -315,22 +449,22 @@ class Modeling():
             ax[i].set_xticks([])
             ax[i].set_yticks([])
         
-        markers = [plt.Line2D([0,0],[0,0], color=color, marker='o', linestyle='') for color in palette_he.values()]
-        plt.legend(markers, palette_he.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
+        markers = [plt.Line2D([0,0],[0,0], color=color, marker='o', linestyle='') for color in self.palette_type.values()]
+        plt.legend(markers, self.palette_type.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
         fig.savefig(f"/data0/crp/results/umaps_embedding_{self.platform}_{self.source}_{self.sample}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
-    def draw_heatmap(self, cell_types, palette_he):
+    def draw_heatmap(self):
         adata_actual = anndata.AnnData(
             X = self.expressions,
-            var = pd.DataFrame(index=self.var_names),
+            var = pd.DataFrame(index=self.genes),
             obs = pd.DataFrame({self.cell_type: self.labels})
         )
         adata_reconstruction = anndata.AnnData(
             X = self.reconstructions,
-            var = pd.DataFrame(index=self.var_names),
+            var = pd.DataFrame(index=self.genes),
             obs = pd.DataFrame({self.cell_type: self.labels})
         )
 
@@ -397,8 +531,8 @@ class Modeling():
         with torch.no_grad():
             for cell_id, image in tqdm(inference_loader):
                 image = image.to(device, non_blocking=True)
-                embedding = self.encoder(image)
-                logit = self.classifier(embedding)
+                embedding = self.model.encoder(image)
+                logit = self.model.classifier(embedding)
                 prediction = torch.argmax(logit, dim=1)
                 predictions.append(prediction.detach().cpu())
 

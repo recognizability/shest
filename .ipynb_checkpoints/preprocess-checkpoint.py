@@ -19,26 +19,28 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from config import n_cores, seed, set_seed
+from config import n_cores, seed, set_seed, cell_types_lung
 
 sc.settings.n_jobs = n_cores
 
 class Preprocess():
-    def __init__(self, args, config):
-        self.directory = args.directory
-        self.platform = args.platform
-        self.source = args.source
-        self.sample = args.sample
-        self.force_annotate = args.force_annotate
-        self.force_categorize = args.force_categorize
-        self.cell_type = args.cell_type
-        self.cell_types = config.cell_types
+    def __init__(self, directory, platform, source, sample, force_annotate, force_categorize):
+        self.directory = directory
+        self.platform = platform
+        self.source = source
+        self.sample = sample
+        self.force_annotate = force_annotate
+        self.force_categorize = force_categorize
 
         raw_path = f"/data0/{self.platform}/{self.source}/{self.sample}/"
         self.pixel_size = json.load(open(raw_path + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower_bound = int(4 // self.pixel_size) #micrometer/(micrometer/pixel)
         self.upper_bound = int(18 // self.pixel_size) #micrometer/(micrometer/pixel)
         self.crop_size = self.upper_bound
+
+        if 'lung' in self.sample or 'Lung' in self.sample:
+            self.organ = 'Lung'
+            self.cell_types = cell_types_lung
 
         self.sdata = self._prepare_sdata(raw_path)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
@@ -51,6 +53,7 @@ class Preprocess():
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape #(c, y, x)
 
+        self.use_type = None
         self.image_path = None
         self.annotated_cell_ids = None
         self.filtered_cell_ids = None
@@ -82,7 +85,7 @@ class Preprocess():
             print(ref.shape)
         return ref
 
-    def annotation(self, cell_subtype='cell_type_tumor'):
+    def annotation(self, cell_subtype='cell_type_tumor', use_type='Cell_type'):
         he_annotation = pd.read_csv(self.processed_path + f"annotation/merged_output.csv")
         he_annotation = he_annotation.set_index("cell_id")[["group"]]
         he_annotation.to_csv(self.processed_path + "annotation/he_annotation.csv")
@@ -128,7 +131,8 @@ class Preprocess():
             else:
                 self.adata = sc.read_h5ad(adata_file)
 
-        self.annotated_cell_ids = self.adata.obs[self.adata.obs[self.cell_type].notna()].index
+        self.use_type = use_type
+        self.annotated_cell_ids = self.adata.obs[self.adata.obs[self.use_type].notna()].index
         print(f'{len(self.annotated_cell_ids)} cells are used to make their H&E images')
 
     def cell_area_filter(self):
@@ -191,7 +195,7 @@ class Preprocess():
             cropped_image.save(self.image_path + f"{cell_id}.png")
         
     def crop_cells(self):
-        self.image_path = self.processed_path + f'he{self.crop_size}/{self.cell_type}/'
+        self.image_path = self.processed_path + f'he{self.crop_size}/{self.use_type}/'
         os.makedirs(self.image_path, exist_ok=True)
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
         print(f'{len(self.cell_ids)} cells are been preparing in {self.image_path} directory for modeling')
