@@ -1,7 +1,7 @@
 import argparse
 
 from config import seed, set_seed, Config
-from preprocess import Preprocess
+from preprocess import Preprocessing
 from model import Modeling
 
 if __name__ == "__main__":
