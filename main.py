@@ -19,10 +19,10 @@ if __name__ == "__main__":
     parser.add_argument("--force_annotate", action="store_true", help="Force annotation on the cells")
     parser.add_argument("--force_categorize", action="store_true", help="Force categorize the cells")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
+    parser.add_argument("--rotate", action="store_true", help="Rotate the images in 0, 90, 180 and 270 degree")
     parser.add_argument("--epochs", type=int, default=20, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
     parser.add_argument("--train", action="store_true", help="Force training the model")
-    parser.add_argument("--rotate", action="store_true", help="Rotate the images in 0, 90, 180 and 270 degree")
     args = parser.parse_args()
     print(args)
 

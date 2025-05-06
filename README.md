@@ -13,8 +13,8 @@
 ```
 usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM]
                [--source SOURCE] [--sample SAMPLE] [--he HE] [--cell_type CELL_TYPE]
-               [--force_annotate] [--force_categorize] [--batch_size BATCH_SIZE] [--epochs EPOCHS]
-               [--lr LR] [--train] [--rotate]
+               [--force_annotate] [--force_categorize] [--batch_size BATCH_SIZE] [--rotate]
+               [--epochs EPOCHS] [--lr LR] [--train]
 
 Sample information and hyperparameters
 
@@ -34,8 +34,8 @@ options:
   --force_categorize    Force categorize the cells (default: False)
   --batch_size BATCH_SIZE
                         Batch size of data loader (default: 128)
+  --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
   --epochs EPOCHS       Number of epochs in training (default: 20)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --train               Force training the model (default: False)
-  --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
 ```

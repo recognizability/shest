@@ -260,9 +260,6 @@ class Modeling():
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
-        self.epochs = args.epochs
-        self.lr = args.lr
-        self.train = args.train
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
 
@@ -274,8 +271,14 @@ class Modeling():
         self.label_encoder.fit(self.classes)
         self.n_classes = len(self.classes)
 
+        self.epochs = args.epochs
+        self.lr = args.lr
+        self.train = args.train
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
+
+        self.criterion_reconstruction = NegativeBinomialLoss()
+        self.criterion_classification = nn.CrossEntropyLoss()
 
         self.images = None
         self.expressions = None
@@ -283,9 +286,6 @@ class Modeling():
         self.reconstructions = None
         self.labels = None
         self.predictions = None
-
-        self.criterion_reconstruction = NegativeBinomialLoss()
-        self.criterion_classification = nn.CrossEntropyLoss()
 
         self.load()
 
