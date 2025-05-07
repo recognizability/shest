@@ -1,8 +1,8 @@
 import argparse
 
-from .config import seed, set_seed, Config
-from .preprocess import Preprocessing
-from .model import Modeling
+from config import seed, set_seed, Config
+from preprocess import Preprocessing
+from model import Modeling
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -28,10 +28,10 @@ if __name__ == "__main__":
 
     config = Config(args)
 
-    preprocessing = Preprocessing(args, config)
-    preprocessing.annotation()
-    preprocessing.cell_area_filter()
-    preprocessing.crop_the_common_cells()
+#    preprocessing = Preprocessing(args, config)
+#    preprocessing.annotation()
+#    preprocessing.cell_area_filter()
+#    preprocessing.crop_the_common_cells()
 
     modeling = Modeling(args, config)
     modeling.evaluate()

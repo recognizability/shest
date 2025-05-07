@@ -1,6 +1,7 @@
 import os
 import random
 import numpy as np
+from sklearn.preprocessing import LabelEncoder
 import torch
 import multiprocessing as mp
 import seaborn as sns
@@ -89,4 +90,14 @@ class Config:
             sns.color_palette(palette, n_colors=len(self.cell_subtypes)).as_hex()
         ))
 
+        self.label_encoder = LabelEncoder()
+        if args.cell_type == 'Cell_type' or args.cell_type == 'Cell_type_ST' or args.cell_type == 'Cell_type_HE':
+            parameters = list(self.cell_types.keys())
+        elif args.cell_type == 'Cell_subtype_ST':
+            parameters =  self.cell_subtypes
+        self.label_encoder.fit(parameters)
+        self.label_encoder.classes_ = np.array(parameters)
+        self.classes = self.label_encoder.classes_
+        print('The classes are:', self.classes)
+    
         self.angles = [0, 90, 180, 270] if args.rotate else [0]

@@ -19,7 +19,7 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from .config import n_cores, seed, set_seed
+from config import n_cores, seed, set_seed
 
 sc.settings.n_jobs = n_cores
 
@@ -49,7 +49,7 @@ class Preprocessing():
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape #(c, y, x)
 
-        self.image_path = None
+        self.image_directory = None
         self.annotated_cell_ids = None
         self.filtered_cell_ids = None
         self.cell_ids = None
@@ -186,12 +186,12 @@ class Preprocessing():
             cropped_image = self.he_image_array[:, y_min:y_max, x_min:x_max]
             cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
             cropped_image = Image.fromarray(cropped_image)
-            cropped_image.save(self.image_path + f"{cell_id}.png")
+            cropped_image.save(self.image_directory + f"{cell_id}.png")
         
     def crop_the_common_cells(self):
-        self.image_path = self.processing_directory + f'he{self.crop_size}/{self.cell_type}/'
-        os.makedirs(self.image_path, exist_ok=True)
+        self.image_directory = self.processing_directory + f'he{self.crop_size}/{self.cell_type}/'
+        os.makedirs(self.image_directory, exist_ok=True)
         self.cell_ids = set(self.annotated_cell_ids) & set(self.filtered_cell_ids)
-        print(f'{len(self.cell_ids)} cells are been preparing in {self.image_path} directory for modeling')
+        print(f'{len(self.cell_ids)} cells are been preparing in {self.image_directory} directory for modeling')
         with ThreadPoolExecutor(max_workers=n_cores) as executor:
             list(tqdm(executor.map(self._crop_he_image, self.cell_ids, chunksize=len(self.cell_ids)//n_cores), total=len(self.cell_ids)))

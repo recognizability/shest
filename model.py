@@ -28,12 +28,13 @@ import cv2
 from PIL import Image
 import torchvision.transforms as transforms
 import torchvision.models as models
+from conch.open_clip_custom import create_model_from_pretrained
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from .config import n_cores, seed, set_seed, generator, device
+from config import n_cores, seed, set_seed, generator, device
 
 sc.settings.n_jobs = n_cores
 
@@ -42,7 +43,8 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-in_features = 1000 #output features of ViT or SwinTransformer
+#in_features = 1000 #output features of ViT or SwinTransformer
+in_features = 512 #output features of CONCH
 
 def preprocessing(adata):
     adata.var_names_make_unique()
@@ -73,15 +75,6 @@ class Dataset():
         image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
         print(len(image_ids), "images of the cells are prepared.")
 
-        self.label_encoder = LabelEncoder()
-        if self.cell_type == 'Cell_type' or self.cell_type == 'Cell_type_ST' or self.cell_type == 'Cell_type_HE':
-            self.parameters = list(self.cell_types.keys())
-        elif self.cell_type == 'Cell_subtype_ST':
-            self.parameters =  self.cell_subtypes
-        self.label_encoder.fit(self.parameters)
-        self.label_encoder.classes_ = np.array(self.parameters)
-        self.classes = self.label_encoder.classes_
-    
         print('Expression profile and their cell types loading ... ', end='')
         adata_file = os.path.join(processing_directory, f'annotation/adata_{self.he}.h5ad')
         self.adata_raw = sc.read_h5ad(adata_file)
@@ -99,8 +92,10 @@ class Dataset():
         self.adata = self.adata_raw[self.cell_ids, :].copy()
         print(self.adata.obs[self.cell_type].value_counts())
         self.cell_type_encoded = self.cell_type + '_encoded'
+        self.label_encoder = config.label_encoder
         self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
         self.genes = self.adata.var_names.tolist()
+        self.classes = config.classes
 
         cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
         self.expressions = self.adata.X[cell_indices].toarray().astype(np.float32)
@@ -156,17 +151,27 @@ class Dataset():
             test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
             return train_loader, test_loader
 
+#class Encoder(nn.Module):
+#    def __init__(self, backbone="vit_b_16"):
+#        super().__init__()
+#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
+#        for param in self.encoder.parameters():
+#            param.requires_grad = False
+#        for param in self.encoder.heads.parameters():
+#            param.requires_grad = True #for only the last heads
+#
+#    def forward(self, x):
+#        return self.encoder(x)
+
 class Encoder(nn.Module):
-    def __init__(self, backbone="vit_b_16"):
+    def __init__(self):
         super().__init__()
-        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
-        for param in self.encoder.parameters():
-            param.requires_grad = False
-        for param in self.encoder.heads.parameters():
-            param.requires_grad = True #for only the last heads
+        self.encoder, self.preprocess = create_model_from_pretrained("conch_ViT-B-16", checkpoint_path="/data0/crp/models/conch/pytorch_model.bin")
 
     def forward(self, x):
-        return self.encoder(x)
+#        with torch.inference_mode():
+        with torch.no_grad():
+            return self.encoder.encode_image(x, proj_contrast=False, normalize=False).squeeze(1)
 
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
@@ -263,12 +268,12 @@ class Modeling():
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
-        self.genes = dataset.genes
-        self.classes = dataset.classes
         self.train_loader, self.test_loader = dataset.loader()
+
+        self.genes = dataset.genes
         self.n_genes = len(self.genes)
-        self.label_encoder = LabelEncoder()
-        self.label_encoder.fit(self.classes)
+        self.label_encoder = config.label_encoder
+        self.classes = config.classes
         self.n_classes = len(self.classes)
 
         self.epochs = args.epochs
@@ -300,7 +305,10 @@ class Modeling():
             print(f"Training the model ...")
             escape = False
             for epoch in range(self.epochs):
-                self.model.train()
+#                self.model.train()
+                self.model.encoder.eval()
+                self.model.reconstructor.train()
+                self.model.classifier.train()
                 train_loss_reconstruction = 0
                 train_loss_classification = 0
 
@@ -309,7 +317,9 @@ class Modeling():
                     expression = expression.to(device, non_blocking=True)
                     label = label.to(device, non_blocking=True)
                     
-                    embedding = self.model.encoder(image)
+#                    embedding = self.model.encoder(image)
+                    with torch.no_grad():
+                        embedding = self.model.encoder(image)
                     if torch.isnan(embedding).any():
                         print("nan found in embedding")
                         escape = True
@@ -354,6 +364,7 @@ class Modeling():
             torch.cuda.empty_cache()
 
         else: 
+            print(f"Loading weights from {model_file} ...")
             self.model.load_state_dict(torch.load(model_file, map_location=device))
 
     def evaluate(self):
@@ -488,6 +499,10 @@ class Modeling():
         sc.tl.dendrogram(adata_reconstruction, groupby=self.cell_type)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type)
 
+        cell_type_order = adata_actual.obs[self.cell_type].cat.categories.tolist()
+        adata_actual.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
+        adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
+
         sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_actual.png")
@@ -511,27 +526,37 @@ class Modeling():
         plt.close()
 
     def draw_confusion_matrix(self):
-        f1 = f1_score(self.labels, self.predictions, average='weighted')
-        print('Average F1 score', f1)
+        fig, ax = plt.subplots(2, figsize=(len(self.classes), len(self.classes)+2))
 
         cm = confusion_matrix(self.labels, self.predictions, labels=self.classes)
+        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes, ax=ax[0])
+        f1_weighted = f1_score(self.labels, self.predictions, average='weighted')
+        print('Weighted F1 score', f1_weighted)
+        ax[0].set_title(f"{self.cell_type} (weighted f1: {f1_weighted:.4f})")
+        ax[0].set_xlabel('Prediction')
+        ax[0].set_ylabel('Label')
 
-        plt.figure(figsize=(len(self.classes)//2+2, len(self.classes)//2))
-        sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes)
-        plt.title(f"{self.cell_type} (f1={f1:.4f})")
-        plt.xlabel('Prediction')
-        plt.ylabel('Label')
+        cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        sns.heatmap(cm_normalized, annot=True, fmt='.2f', xticklabels=self.classes, yticklabels=self.classes, ax=ax[1])
+        f1_macro = f1_score(self.labels, self.predictions, average='macro')
+        print('Macro F1 score', f1_macro)
+        ax[1].set_title(f"{self.cell_type} (macro f1: {f1_macro:.4f})")
+        ax[1].set_xlabel('Prediction')
+        ax[1].set_ylabel('Label')
 
+        fig.tight_layout()
         plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
         plt.close()
 
     def infer(self, inference_loader):
         self.model.eval()
+        cell_ids = []
         predictions = []
         
         print(f"Inferring with the {self.cell_type} prediction model ...")
         with torch.no_grad():
             for cell_id, image in tqdm(inference_loader):
+                cell_ids.extend(cell_id)
                 image = image.to(device, non_blocking=True)
                 embedding = self.model.encoder(image)
                 logit = self.model.classifier(embedding)
@@ -544,4 +569,4 @@ class Modeling():
         gc.collect()
         torch.cuda.empty_cache()
 
-        return predictions
+        return pd.Series(predictions, index=cell_ids)
