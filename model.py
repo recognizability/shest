@@ -52,6 +52,7 @@ class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
         self.upper = args.upper
+        self.upper_string = f"upper{args.upper}"
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -62,8 +63,8 @@ class Dataset():
         self.stem_file = config.stem_file
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        self.images = torch.load(processing_directory + f'images/images_upper{self.upper}.pt')
-        self.image_ids = json.load(open(processing_directory + f"images/image_ids_upper{self.upper}.json"))
+        self.images = torch.load(processing_directory + f'images/images_{self.upper_string}.pt')
+        self.image_ids = json.load(open(processing_directory + f"images/image_ids_{self.upper_string}.json"))
         print(len(self.image_ids), "images of the cells are prepared.")
 
         print('Expression profile and their cell types loading ... ', end='')
@@ -125,7 +126,7 @@ class Dataset():
                 ax[i][0].bar_label(container)
             sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_upper{self.upper}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
         plt.close()
 
     def loader(self, split=0.8):
@@ -242,7 +243,8 @@ class Modeling():
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
         self.upper = args.upper
-        self.suffix = f"{self.upper}_{self.cell_type}_{self.angles_string}"
+        self.upper_string = f"upper{args.upper}"
+        self.suffix = f"{self.upper_string}_{self.cell_type}_{self.angles_string}"
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
