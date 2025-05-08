@@ -125,7 +125,7 @@ class Dataset():
                 ax[i][0].bar_label(container)
             sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_upper{self.upper}.png", bbox_inches="tight")
         plt.close()
 
     def loader(self, split=0.8):

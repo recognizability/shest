@@ -31,7 +31,6 @@ class Preprocessing():
         self.stem_file = config.stem_file
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
-        self.resave = args.resave
         self.cell_types = config.cell_types
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
@@ -141,7 +140,7 @@ class Preprocessing():
         plt.axvline(x=self.upper, linestyle='--', color='gray')
         plt.axvline(x=self.lower, linestyle='--', color='gray')
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/violinplot_{self.stem_file}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/violinplot_{self.stem_file}_upper{self.upper}.png", bbox_inches="tight")
         plt.close(fig)
         
         bounds_ids = bounds[
@@ -169,13 +168,12 @@ class Preprocessing():
         os.makedirs(self.processing_directory + f'images/', exist_ok=True)
         images_file = self.processing_directory + f"images/images_upper{self.upper}.pt"
         ids_file = self.processing_directory + f"images/image_ids_upper{self.upper}.json"
-        if not (os.path.exists(images_file) and os.path.exists(ids_file)) or self.resave:
-            print("Stacking the torch tensors ... ")
-            images = torch.stack(list(ids_images.values()))
-            print(images.shape)
-            print("Save the tensor ...")
-            torch.save(images, images_file)
-            json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(ids_file, "w"))
+        print("Stacking the torch tensors ... ")
+        images = torch.stack(list(ids_images.values()))
+        print(images.shape)
+        print("Save the tensor ...")
+        torch.save(images, images_file)
+        json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(ids_file, "w"))
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
