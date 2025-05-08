@@ -33,9 +33,11 @@ class Preprocessing():
         self.cell_types = config.cell_types
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
-        self.lower_bound = int(4 // self.pixel_size) #micrometer/(micrometer/pixel)
-        self.upper_bound = int(18 // self.pixel_size) #micrometer/(micrometer/pixel)
-        self.crop_size = self.upper_bound
+        self.lower = 4 #micrometers
+        self.upper = args.upper #micrometers
+        self.filter = args.filter
+        self.variable = args.variable
+        self.variable_string = config.variable_string
 
         self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
@@ -128,13 +130,18 @@ class Preprocessing():
 
     def _crop_he_image(self, cell_id):
         image_file = self.image_directory + f"{cell_id}.png"
-        if not os.path.exists(image_file):
+        if not os.path.exists(image_file) or self.filter:
             centroid = self.cell_boundaries.loc[cell_id, "geometry"].centroid
             xenium_x_um, xenium_y_um = centroid.x, centroid.y
             xenium_x_px, xenium_y_px = xenium_x_um / self.pixel_size, xenium_y_um / self.pixel_size
             he_x, he_y = self._inverse_affine_transform(xenium_x_px, xenium_y_px)
             he_x, he_y = round(he_x), round(he_y)
-            half = self.crop_size // 2
+            if self.variable:
+                crop_size_micrometer = self.adata.obs.loc[cell_id, 'crop_size']
+                crop_size = int(crop_size_micrometer // self.pixel_size) #pixels
+            else:
+                crop_size = int(self.upper // self.pixel_size) #pixels
+            half = crop_size // 2
             x_min = int(he_x - half)
             x_max = int(he_x + half)
             y_min = int(he_y - half)
@@ -148,28 +155,31 @@ class Preprocessing():
         
     def cell_area_filter(self):
         bounds = self.cell_boundaries.bounds
-        bounds = bounds / self.pixel_size #in pixel
         bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
         bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
         bounds = bounds.merge(self.adata.obs['Cell_type_ST'], how='left', left_index=True, right_index=True)
         bounds_melted = bounds.melt(id_vars='Cell_type_ST', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
-        bounds_melted["Length_(μm)"] *= self.pixel_size #in micrometer
 
         fig = plt.figure(figsize=(4, 4))
         sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type_ST', hue='Length', split=True, inner='quart', order=list(self.cell_types.keys()))
-        plt.axvline(x=self.upper_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
-        plt.axvline(x=self.lower_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
+        plt.axvline(x=self.upper, linestyle='--', color='gray')
+        plt.axvline(x=self.lower, linestyle='--', color='gray')
         fig.tight_layout()
         fig.savefig(self.directory + f"results/violinplot_{self.stem_file}.png", bbox_inches="tight")
         plt.close(fig)
         
         self.filtered_cell_ids = bounds[
-            (self.lower_bound <= bounds['width']) & 
-            (bounds['width'] < self.upper_bound) &
-            (self.lower_bound <= bounds['height']) & 
-            (bounds['height'] < self.upper_bound)
+            (self.lower <= bounds['width']) & 
+            (bounds['width'] < self.upper) &
+            (self.lower <= bounds['height']) & 
+            (bounds['height'] < self.upper)
         ].index
-        self.image_directory = self.processing_directory + f'he{self.crop_size}/'
+
+        if self.variable:
+            crop_sizes = bounds.loc[self.filtered_cell_ids][['width', 'height']].max(axis=1)
+            self.adata.obs = self.adata.obs.join(crop_sizes.rename('crop_size'))
+            print('Merged the crop sizes to adata')
+        self.image_directory = self.processing_directory + f'he{self.upper}/{self.variable_string}/'
         os.makedirs(self.image_directory, exist_ok=True)
         print(f"{len(self.filtered_cell_ids)} cells are selected by their area and are being cropped in the {self.image_directory} directory...")
         with ThreadPoolExecutor(max_workers=n_cores) as executor:

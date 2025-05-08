@@ -11,8 +11,8 @@
 ## Execution
 
 ```
-usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM]
-               [--source SOURCE] [--sample SAMPLE] [--he HE] [--cell_type CELL_TYPE] [--sc_annotate]
+usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE]
+               [--sample SAMPLE] [--upper UPPER] [--filter] [--variable] [--cell_type CELL_TYPE] [--sc_annotate]
                [--batch_size BATCH_SIZE] [--rotate] [--epochs EPOCHS] [--lr LR] [--train]
 
 Sample information and hyperparameters
@@ -26,7 +26,10 @@ options:
   --platform PLATFORM   Platform of spatial transcriptomics (default: Xenium_Prime)
   --source SOURCE       Data source (default: 10X)
   --sample SAMPLE       Sample name (default: Human_Lung_Cancer)
-  --he HE               H&E images with side length in pixel (default: he84)
+  --upper UPPER         Upper limit of the one side length of the bounding rectangle of a cell within an H&E image (in
+                        micrometers) (default: 18)
+  --filter              Force filtration by the cell area (default: False)
+  --variable            Variable image crop size (default: False)
   --cell_type CELL_TYPE
                         Cell type to consider (default: Cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)

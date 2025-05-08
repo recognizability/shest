@@ -58,7 +58,7 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.he = args.he
+        self.he = f"he{args.upper}"
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -67,9 +67,10 @@ class Dataset():
         self.batch_size = args.batch_size
         self.angles = config.angles
         self.stem_file = config.stem_file
+        self.variable_string = config.variable_string
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        image_directory = os.path.join(processing_directory, self.he)
+        image_directory = os.path.join(processing_directory, self.he, self.variable_string, '') #the last slash
         image_files = glob(os.path.join(image_directory, '*.png'))
         image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
         print(len(image_ids), "images of the cells are prepared.")
@@ -246,12 +247,14 @@ class Modeling():
     def __init__(self, args, config):
         self.directory = args.directory
         self.stem_file = config.stem_file
-        self.he = args.he
+        self.variable_string = config.variable_string
+        self.he = f"he{args.upper}"
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
+        self.suffix = f"{self.he}_{self.cell_type}_{self.variable_string}_{self.angles_string}"
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
@@ -282,15 +285,19 @@ class Modeling():
         self.load()
 
     def load(self):
-        model_file = self.directory + f"models/model_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.pth"
+        model_file = self.directory + f"models/model_{self.stem_file}_{self.suffix}.pth"
         if not os.path.isfile(model_file) or self.train:
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
             gc.collect()
             torch.cuda.empty_cache()
-            
+
             print(f"Training the model ...")
             escape = False
+            best_loss_reconstruction = float('inf')
+            best_loss_classification = float('inf')
+            patience = 3
+            counter = 0
             for epoch in range(self.epochs):
                 self.model.train()
                 train_loss_reconstruction = 0
@@ -342,6 +349,22 @@ class Modeling():
 
                 if epoch >= 20:
                     torch.save(self.model.state_dict(), model_file)
+
+                    if best_loss_reconstruction == float('inf') or (best_loss_reconstruction - average_loss_reconstruction) / best_loss_reconstruction >= 0.001:
+                        best_loss_reconstruction = average_loss_reconstruction
+                    else:
+                        counter += 1
+                        print(f"Early stopping counter is updated as {counter}/{patience} by the reconstruction loss")
+
+                    if best_loss_classification == float('inf') or (best_loss_classification - average_loss_classification) / best_loss_classification >= 0.001:
+                        best_loss_classification = average_loss_classification
+                    else:
+                        counter += 1
+                        print(f"Early stopping counter is updated as {counter}/{patience} by the classification loss")
+
+                    if counter >= patience:
+                        print("The training is stopped eraly.")
+                        break
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -449,7 +472,7 @@ class Modeling():
         plt.legend(markers, self.palette_type.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.suffix}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self):
@@ -505,7 +528,7 @@ class Modeling():
         ax[1].set_title("Reconstructed")
 
         plt.tight_layout()
-        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png")
+        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.suffix}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
@@ -528,7 +551,7 @@ class Modeling():
         ax[1].set_ylabel('Label')
 
         fig.tight_layout()
-        plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.he}_{self.cell_type}_{self.angles_string}.png", bbox_inches="tight")
+        plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.suffix}.png", bbox_inches="tight")
         plt.close()
 
     def infer(self, inference_loader):
