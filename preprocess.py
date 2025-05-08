@@ -4,6 +4,8 @@ import json
 import numpy as np
 import pandas as pd
 from scipy import sparse
+import torch
+import torchvision.transforms as transforms
 
 import spatialdata as sd
 from spatialdata.transformations import get_transformation
@@ -13,7 +15,6 @@ from spatialdata_io import xenium
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
-from PIL import Image
 import matplotlib.pyplot as plt
 import seaborn as sns
 import scanpy as sc
@@ -30,14 +31,14 @@ class Preprocessing():
         self.stem_file = config.stem_file
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
+        self.resave = args.resave
         self.cell_types = config.cell_types
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower = 4 #micrometers
         self.upper = args.upper #micrometers
+        self.crop_size = int(self.upper // self.pixel_size) #pixels
         self.filter = args.filter
-        self.variable = args.variable
-        self.variable_string = config.variable_string
 
         self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
@@ -47,12 +48,11 @@ class Preprocessing():
         self.processing_directory = self.directory + 'dataset/' + config.stem_directory
         os.makedirs(self.processing_directory, exist_ok=True)
 
-        self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values 
-        self.image_channels, self.image_height, self.image_width = self.he_image_array.shape #(c, y, x)
+        self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values #y, x, c
+        self.image_channels, self.image_height, self.image_width = self.he_image_array.shape
 
-        self.image_directory = None
         self.annotated_cell_ids = None
-        self.filtered_cell_ids = None
+        self.image_ids = None
         self.cell_ids = None
         
         self.sc_annotation()
@@ -86,6 +86,7 @@ class Preprocessing():
         return ref
 
     def sc_annotation(self, cell_subtype='cell_type_tumor'):
+        os.makedirs(self.processing_directory + f'annotation/', exist_ok=True)
         sc_annotation_csv = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.csv'
         sc_annotation_h5ad = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.h5ad'
         if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)) or self.sc_annotate:
@@ -128,31 +129,6 @@ class Preprocessing():
         else:
             return x_transformed, y_transformed
 
-    def _crop_he_image(self, cell_id):
-        image_file = self.image_directory + f"{cell_id}.png"
-        if not os.path.exists(image_file) or self.filter:
-            centroid = self.cell_boundaries.loc[cell_id, "geometry"].centroid
-            xenium_x_um, xenium_y_um = centroid.x, centroid.y
-            xenium_x_px, xenium_y_px = xenium_x_um / self.pixel_size, xenium_y_um / self.pixel_size
-            he_x, he_y = self._inverse_affine_transform(xenium_x_px, xenium_y_px)
-            he_x, he_y = round(he_x), round(he_y)
-            if self.variable:
-                crop_size_micrometer = self.adata.obs.loc[cell_id, 'crop_size']
-                crop_size = int(crop_size_micrometer // self.pixel_size) #pixels
-            else:
-                crop_size = int(self.upper // self.pixel_size) #pixels
-            half = crop_size // 2
-            x_min = int(he_x - half)
-            x_max = int(he_x + half)
-            y_min = int(he_y - half)
-            y_max = int(he_y + half)
-
-            if 0 <= x_min and x_max < self.image_width and 0 <= y_min and y_max < self.image_height:
-                cropped_image = self.he_image_array[:, y_min:y_max, x_min:x_max]
-                cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
-                cropped_image = Image.fromarray(cropped_image)
-                cropped_image.save(image_file)
-        
     def cell_area_filter(self):
         bounds = self.cell_boundaries.bounds
         bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
@@ -168,22 +144,38 @@ class Preprocessing():
         fig.savefig(self.directory + f"results/violinplot_{self.stem_file}.png", bbox_inches="tight")
         plt.close(fig)
         
-        self.filtered_cell_ids = bounds[
+        bounds_ids = bounds[
             (self.lower <= bounds['width']) & 
             (bounds['width'] < self.upper) &
             (self.lower <= bounds['height']) & 
             (bounds['height'] < self.upper)
         ].index
+        print(f"{len(bounds_ids)} cells are filtered by their area.")
 
-        if self.variable:
-            crop_sizes = bounds.loc[self.filtered_cell_ids][['width', 'height']].max(axis=1)
-            self.adata.obs = self.adata.obs.join(crop_sizes.rename('crop_size'))
-            print('Merged the crop sizes to adata')
-        self.image_directory = self.processing_directory + f'he{self.upper}/{self.variable_string}/'
-        os.makedirs(self.image_directory, exist_ok=True)
-        print(f"{len(self.filtered_cell_ids)} cells are selected by their area and are being cropped in the {self.image_directory} directory...")
-        with ThreadPoolExecutor(max_workers=n_cores) as executor:
-            list(tqdm(executor.map(self._crop_he_image, self.filtered_cell_ids, chunksize=len(self.filtered_cell_ids)//n_cores), total=len(self.filtered_cell_ids)))
+        centroids = self.cell_boundaries.loc[bounds_ids, "geometry"].centroid
+        centroids_x, centroids_y = self._inverse_affine_transform(centroids.x/self.pixel_size, centroids.y/self.pixel_size)
+        centroids_x = centroids_x.round().astype(int)
+        centroids_y = centroids_y.round().astype(int)
+        half = int(self.crop_size // 2)
+        coords = np.stack([centroids_x-half, centroids_x+half, centroids_y-half, centroids_y+half], axis=1)
+        print("Making images to torch tensors ... ", end='')
+        ids_images = {
+            cell_id: torch.from_numpy(self.he_image_array[:, y_min:y_max, x_min:x_max])
+            for cell_id, (x_min, x_max, y_min, y_max) in zip(bounds_ids, coords)
+            if 0 <= x_min < x_max < self.image_width and 0 <= y_min < y_max < self.image_height
+        }
+        self.image_ids = ids_images.keys()
+        print(len(self.image_ids))
+        os.makedirs(self.processing_directory + f'images/', exist_ok=True)
+        images_file = self.processing_directory + f"images/images_upper{self.upper}.pt"
+        ids_file = self.processing_directory + f"images/image_ids_upper{self.upper}.json"
+        if not (os.path.exists(images_file) and os.path.exists(ids_file)) or self.resave:
+            print("Stacking the torch tensors ... ")
+            images = torch.stack(list(ids_images.values()))
+            print(images.shape)
+            print("Save the tensor ...")
+            torch.save(images, images_file)
+            json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(ids_file, "w"))
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
@@ -199,7 +191,7 @@ class Preprocessing():
         self.annotated_cell_ids = self.adata.obs[self.adata.obs['Cell_type_annotation'].notna()].index
         print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
 
-        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.filtered_cell_ids)))
+        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
         print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
         self.adata.obs['Cell_type'] = self.adata.obs['Cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
 

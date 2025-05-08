@@ -73,7 +73,6 @@ class Config:
     def __init__(self, args):
         self.stem_directory = f"{args.platform}/{args.source}/{args.sample}/"
         self.stem_file = f"{args.platform}_{args.source}_{args.sample}"
-        self.variable_string = 'variable' if args.variable else 'fixed'
 
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])

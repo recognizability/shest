@@ -9,6 +9,7 @@ from collections import Counter
 from tqdm import tqdm
 from tqdm.contrib.concurrent import thread_map
 
+import json
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -24,8 +25,6 @@ import torch.nn.functional as F
 from torch.distributions import NegativeBinomial
 from torch.utils.data import DataLoader, random_split
 
-import cv2
-from PIL import Image
 import torchvision.transforms as transforms
 import torchvision.models as models
 from conch.open_clip_custom import create_model_from_pretrained
@@ -37,12 +36,6 @@ import matplotlib.image as mpimg
 from config import n_cores, seed, set_seed, generator, device
 
 sc.settings.n_jobs = n_cores
-
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-])
-
 in_features = 1000 #output features of ViT or SwinTransformer
 
 def preprocessing(adata):
@@ -58,7 +51,7 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.he = f"he{args.upper}"
+        self.upper = args.upper
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -67,13 +60,11 @@ class Dataset():
         self.batch_size = args.batch_size
         self.angles = config.angles
         self.stem_file = config.stem_file
-        self.variable_string = config.variable_string
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        image_directory = os.path.join(processing_directory, self.he, self.variable_string, '') #the last slash
-        image_files = glob(os.path.join(image_directory, '*.png'))
-        image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
-        print(len(image_ids), "images of the cells are prepared.")
+        self.images = torch.load(processing_directory + f'images/images_upper{self.upper}.pt')
+        self.image_ids = json.load(open(processing_directory + f"images/image_ids_upper{self.upper}.json"))
+        print(len(self.image_ids), "images of the cells are prepared.")
 
         print('Expression profile and their cell types loading ... ', end='')
         adata_file = os.path.join(processing_directory, f'annotation/adata.h5ad')
@@ -82,12 +73,8 @@ class Dataset():
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
         print(len(type_ids), "of annotated cells are loaded.")
 
-        self.cell_ids = sorted(list(set(image_ids) & set(type_ids)))
+        self.cell_ids = sorted(list(set(self.image_ids) & set(type_ids)))
         print('Common', len(self.cell_ids), "cells are selected.")
-
-        self.image_files = pd.Series(self.cell_ids, index=self.cell_ids).apply(
-            lambda file: os.path.join(image_directory, f"{file}.png")
-        ).to_dict()
 
         self.adata = self.adata_raw[self.cell_ids, :].copy()
         print(self.adata.obs[self.cell_type].value_counts())
@@ -111,11 +98,13 @@ class Dataset():
         cell_id = self.cell_ids[base_i]
         angle = self.angles[angle_i]
 
-        image = cv2.imread(self.image_files[cell_id])
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray(image)
+        image = self.images[self.image_ids[cell_id]]
         image = transforms.functional.rotate(image, angle)
-        image = transform(image)
+        image = transforms.Resize((224, 224))(image)
+        if isinstance(image, torch.Tensor):
+            image = image.float().div(255)
+        else:
+            image = transforms.ToTensor()(image)
 
         expression = torch.from_numpy(self.expressions[base_i])
         label = torch.tensor(self.labels[base_i], dtype=torch.long)
@@ -136,7 +125,7 @@ class Dataset():
                 ax[i][0].bar_label(container)
             sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.he}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper}.png", bbox_inches="tight")
         plt.close()
 
     def loader(self, split=0.8):
@@ -247,14 +236,13 @@ class Modeling():
     def __init__(self, args, config):
         self.directory = args.directory
         self.stem_file = config.stem_file
-        self.variable_string = config.variable_string
-        self.he = f"he{args.upper}"
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
-        self.suffix = f"{self.he}_{self.cell_type}_{self.variable_string}_{self.angles_string}"
+        self.upper = args.upper
+        self.suffix = f"{self.upper}_{self.cell_type}_{self.angles_string}"
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()

@@ -12,7 +12,7 @@
 
 ```
 usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE]
-               [--sample SAMPLE] [--upper UPPER] [--filter] [--variable] [--cell_type CELL_TYPE] [--sc_annotate]
+               [--sample SAMPLE] [--upper UPPER] [--filter] [--cell_type CELL_TYPE] [--sc_annotate] [--resave]
                [--batch_size BATCH_SIZE] [--rotate] [--epochs EPOCHS] [--lr LR] [--train]
 
 Sample information and hyperparameters
@@ -29,10 +29,10 @@ options:
   --upper UPPER         Upper limit of the one side length of the bounding rectangle of a cell within an H&E image (in
                         micrometers) (default: 18)
   --filter              Force filtration by the cell area (default: False)
-  --variable            Variable image crop size (default: False)
   --cell_type CELL_TYPE
                         Cell type to consider (default: Cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)
+  --resave              Force resave a torch tensor from H&E images of the cells (default: False)
   --batch_size BATCH_SIZE
                         Batch size of data loader (default: 128)
   --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
