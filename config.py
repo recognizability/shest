@@ -34,16 +34,18 @@ cell_types = {
             'Tumor cells LUAD MSLN',
             'Tumor cells LUAD NE',
             'Tumor cells LUAD mitotic',
+            'Alveolar cell type 2',
+            'Macrophage alveolar',
+        ],
+        "Macrophage": [
+            "Macrophage",
         ],
         'Stromal_cell': [
-            'stromal dividing',
             'Fibroblast adventitial',
             'Fibroblast alveolar',
             'Fibroblast peribronchial',
             'Smooth muscle cell',
             'Mesothelial',
-        ],
-        'Pericyte': [
             'Pericyte',
         ],
         'Endothelial_cell': [
@@ -53,21 +55,16 @@ cell_types = {
             'Endothelial cell venous',
         ],
         'Lymphocyte': [
-             'B cell',
-             'B cell dividing',
              'Plasma cell',
-             'Plasma cell dividing',
+             'B cell',
              'T cell regulatory',
              'T cell CD4',
-             'T cell CD4 dividing',
              'T cell CD8 activated',
-             'T cell CD8 dividing',
              'T cell CD8 effector memory',
              'T cell CD8 naive',
              'T cell CD8 terminally exhausted',
              'T cell NK-like',
              'NK cell',
-             'NK cell dividing',
         ],
     },
 }
@@ -80,7 +77,7 @@ class Config:
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-        palette = 'blend:red,orange,green,blue'
+        palette = 'blend:red,orange,yellow,green,blue'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
             sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()

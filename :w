@@ -30,6 +30,7 @@ class Preprocessing():
         self.stem_file = config.stem_file
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
+        self.cell_type = args.cell_type
         self.cell_types = config.cell_types
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
@@ -127,24 +128,22 @@ class Preprocessing():
             return x_transformed, y_transformed
 
     def _crop_he_image(self, cell_id):
-        image_file = self.image_directory + f"{cell_id}.png"
-        if not os.path.exists(image_file):
-            centroid = self.cell_boundaries.loc[cell_id, "geometry"].centroid
-            xenium_x_um, xenium_y_um = centroid.x, centroid.y
-            xenium_x_px, xenium_y_px = xenium_x_um / self.pixel_size, xenium_y_um / self.pixel_size
-            he_x, he_y = self._inverse_affine_transform(xenium_x_px, xenium_y_px)
-            he_x, he_y = round(he_x), round(he_y)
-            half = self.crop_size // 2
-            x_min = int(he_x - half)
-            x_max = int(he_x + half)
-            y_min = int(he_y - half)
-            y_max = int(he_y + half)
+        centroid = self.cell_boundaries.loc[cell_id, "geometry"].centroid
+        xenium_x_um, xenium_y_um = centroid.x, centroid.y
+        xenium_x_px, xenium_y_px = xenium_x_um / self.pixel_size, xenium_y_um / self.pixel_size
+        he_x, he_y = self._inverse_affine_transform(xenium_x_px, xenium_y_px)
+        he_x, he_y = round(he_x), round(he_y)
+        half = self.crop_size // 2
+        x_min = int(he_x - half)
+        x_max = int(he_x + half)
+        y_min = int(he_y - half)
+        y_max = int(he_y + half)
 
-            if 0 <= x_min and x_max < self.image_width and 0 <= y_min and y_max < self.image_height:
-                cropped_image = self.he_image_array[:, y_min:y_max, x_min:x_max]
-                cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
-                cropped_image = Image.fromarray(cropped_image)
-                cropped_image.save(image_file)
+        if 0 <= x_min and x_max < self.image_width and 0 <= y_min and y_max < self.image_height:
+            cropped_image = self.he_image_array[:, y_min:y_max, x_min:x_max]
+            cropped_image = cropped_image.transpose(1, 2, 0) # (c, y, x) to (y, x, c)
+            cropped_image = Image.fromarray(cropped_image)
+            cropped_image.save(self.image_directory + f"{cell_id}.png")
         
     def cell_area_filter(self):
         bounds = self.cell_boundaries.bounds
@@ -156,7 +155,7 @@ class Preprocessing():
         bounds_melted["Length_(μm)"] *= self.pixel_size #in micrometer
 
         fig = plt.figure(figsize=(4, 4))
-        sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type_ST', hue='Length', split=True, inner='quart', order=list(self.cell_types.keys()))
+        sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type_ST', hue='Length', split=True, inner='quart')
         plt.axvline(x=self.upper_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
         plt.axvline(x=self.lower_bound*self.pixel_size, linestyle='--', color='gray') #in micrometer
         fig.tight_layout()
@@ -169,11 +168,11 @@ class Preprocessing():
             (self.lower_bound <= bounds['height']) & 
             (bounds['height'] < self.upper_bound)
         ].index
-        self.image_directory = self.processing_directory + f'he{self.crop_size}/'
+        self.image_directory = self.processing_directory + f'he{self.crop_size}'
         os.makedirs(self.image_directory, exist_ok=True)
         print(f"{len(self.filtered_cell_ids)} cells are selected by their area and are being cropped in the {self.image_directory} directory...")
         with ThreadPoolExecutor(max_workers=n_cores) as executor:
-            list(tqdm(executor.map(self._crop_he_image, self.filtered_cell_ids, chunksize=len(self.filtered_cell_ids)//n_cores), total=len(self.filtered_cell_ids)))
+            list(tqdm(executor.map(self._crop_he_image, self.filtered_cell_ids, chunksize=len(self.cell_ids)//n_cores), total=len(self.cell_ids)))
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')

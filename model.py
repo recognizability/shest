@@ -43,8 +43,7 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-#in_features = 1000 #output features of ViT or SwinTransformer
-in_features = 512 #output features of CONCH
+in_features = 1000 #output features of ViT or SwinTransformer
 
 def preprocessing(adata):
     adata.var_names_make_unique()
@@ -70,13 +69,13 @@ class Dataset():
         self.stem_file = config.stem_file
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        image_directory = os.path.join(processing_directory, self.he, self.cell_type)
+        image_directory = os.path.join(processing_directory, self.he)
         image_files = glob(os.path.join(image_directory, '*.png'))
         image_ids = [cell.split('/')[-1].split('.')[0] for cell in image_files]
         print(len(image_ids), "images of the cells are prepared.")
 
         print('Expression profile and their cell types loading ... ', end='')
-        adata_file = os.path.join(processing_directory, f'annotation/adata_{self.he}.h5ad')
+        adata_file = os.path.join(processing_directory, f'annotation/adata.h5ad')
         self.adata_raw = sc.read_h5ad(adata_file)
         print(self.adata_raw.shape)
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
@@ -123,15 +122,17 @@ class Dataset():
         return cell_id, image, expression, label
 
     def draw_umaps_expression(self):
-        fig, ax = plt.subplots(3, 2, figsize=(7, 9))
-        for i, cell_type in enumerate(['Cell_type_ST', 'Cell_type_HE', 'Cell_type']):
+        fig, ax = plt.subplots(4, 2, figsize=(7, 12))
+        for i, cell_type in enumerate(['Cell_type_ST', 'Cell_type_HE', 'Cell_type_annotation', 'Cell_type']):
             cell_types = self.adata_raw.obs[cell_type].value_counts().index.tolist()
-            sns.barplot(
+            ax[i][0] = sns.barplot(
                pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
                orient = 'h',
                palette = self.palette_type,
                ax=ax[i][0]
             )
+            for container in ax[i][0].containers:
+                ax[i][0].bar_label(container)
             sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.he}.png", bbox_inches="tight")
@@ -151,84 +152,70 @@ class Dataset():
             test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
             return train_loader, test_loader
 
-#class Encoder(nn.Module):
-#    def __init__(self, backbone="vit_b_16"):
-#        super().__init__()
-#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
-#        for param in self.encoder.parameters():
-#            param.requires_grad = False
-#        for param in self.encoder.heads.parameters():
-#            param.requires_grad = True #for only the last heads
-#
-#    def forward(self, x):
-#        return self.encoder(x)
-
 class Encoder(nn.Module):
-    def __init__(self):
+    def __init__(self, backbone="vit_b_16"):
         super().__init__()
-        self.encoder, self.preprocess = create_model_from_pretrained("conch_ViT-B-16", checkpoint_path="/data0/crp/models/conch/pytorch_model.bin")
+        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        for param in self.encoder.heads.parameters():
+            param.requires_grad = True #for only the last heads
 
     def forward(self, x):
-#        with torch.inference_mode():
-        with torch.no_grad():
-            return self.encoder.encode_image(x, proj_contrast=False, normalize=False).squeeze(1)
+        return self.encoder(x)
+
+def reset_parameters(module):
+    for m in module.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.kaiming_uniform_(m.weight, nonlinearity='relu', generator=generator)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.BatchNorm1d):
+            if m.weight is not None:
+                nn.init.ones_(m.weight)
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
 
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
         hidden = 2048
+        dropout = 0.3
         self.bn0 = nn.BatchNorm1d(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
+        self.do1 = nn.Dropout(dropout)
         self.bn1 = nn.BatchNorm1d(hidden)
         self.fc2 = nn.Linear(hidden, hidden)
+        self.do2 = nn.Dropout(dropout)
         self.bn2 = nn.BatchNorm1d(hidden)
         self.fc_mu = nn.Linear(hidden, out_features)
         self.fc_alpha = nn.Linear(hidden, out_features)
 
-        self.reset_parameters()
+        reset_parameters(self)
 
     def forward(self, x):
         x = self.bn0(x)
         x = F.relu(self.bn1(self.fc1(x)))
+        x = self.do1(x)
         x = F.relu(self.bn2(self.fc2(x)))        
+        x = self.do2(x)
         mu = F.softplus(self.fc_mu(x))
         alpha = F.softplus(self.fc_alpha(x))
         return mu, alpha
 
-
-    def reset_parameters(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_uniform_(module.weight, nonlinearity='relu', generator=generator)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.BatchNorm1d):
-                if module.weight is not None:
-                    nn.init.ones_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
 class Classifier(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
+        dropout = 0.3
         self.bn = nn.BatchNorm1d(in_features)
         self.fc = nn.Linear(in_features, out_features)
-        self.reset_parameters()
+
+        reset_parameters(self)
 
     def forward(self, x):
-        return self.fc(self.bn(x))
-
-    def reset_parameters(self):
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_uniform_(module.weight, nonlinearity='linear', generator=generator)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.BatchNorm1d):
-                if module.weight is not None:
-                    nn.init.ones_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
+        x = self.bn(x)
+        x = self.fc(x)
+        return x
 
 class Model(nn.Module):
     def __init__(self, n_genes, n_classes):
@@ -305,10 +292,7 @@ class Modeling():
             print(f"Training the model ...")
             escape = False
             for epoch in range(self.epochs):
-#                self.model.train()
-                self.model.encoder.eval()
-                self.model.reconstructor.train()
-                self.model.classifier.train()
+                self.model.train()
                 train_loss_reconstruction = 0
                 train_loss_classification = 0
 
@@ -317,9 +301,7 @@ class Modeling():
                     expression = expression.to(device, non_blocking=True)
                     label = label.to(device, non_blocking=True)
                     
-#                    embedding = self.model.encoder(image)
-                    with torch.no_grad():
-                        embedding = self.model.encoder(image)
+                    embedding = self.model.encoder(image)
                     if torch.isnan(embedding).any():
                         print("nan found in embedding")
                         escape = True
@@ -358,7 +340,8 @@ class Modeling():
                 average_loss_classification = train_loss_classification / len(self.train_loader)
                 print(f"Epoch: {epoch+1}/{self.epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
 
-                torch.save(self.model.state_dict(), model_file)
+                if epoch >= 20:
+                    torch.save(self.model.state_dict(), model_file)
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -503,11 +486,11 @@ class Modeling():
         adata_actual.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
         adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
 
-        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True)
+        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True, show_gene_labels=True)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_actual.png")
         plt.close()
-        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=True)
+        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=True, show_gene_labels=True)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_reconstruction.png")
         plt.close()
@@ -526,7 +509,7 @@ class Modeling():
         plt.close()
 
     def draw_confusion_matrix(self):
-        fig, ax = plt.subplots(2, figsize=(len(self.classes), len(self.classes)+2))
+        fig, ax = plt.subplots(1, 2, figsize=(len(self.classes)*2, len(self.classes)))
 
         cm = confusion_matrix(self.labels, self.predictions, labels=self.classes)
         sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes, ax=ax[0])
