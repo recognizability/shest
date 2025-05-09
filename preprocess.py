@@ -32,6 +32,7 @@ class Preprocessing():
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
         self.cell_types = config.cell_types
+        self.cell_subtypes = config.cell_subtypes
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower = 4 #micrometers
@@ -112,8 +113,11 @@ class Preprocessing():
             self.adata = sc.read_h5ad(sc_annotation_h5ad)
 
         self.adata.obs.index = self.adata.obs['cell_id']
-        self.adata.obs['Cell_subtype_ST'] = self.adata.obs[cell_subtype]
-        self.adata.obs['Cell_type_ST'] = self.adata.obs[cell_subtype].map({cell: group for group, subtypes in self.cell_types.items() for cell in subtypes})
+        inclusion = self.adata.obs[cell_subtype].isin(self.cell_subtypes)
+        self.adata.obs.loc[inclusion, 'Cell_subtype_ST'] = self.adata.obs.loc[inclusion, cell_subtype]
+        self.adata.obs['Cell_subtype_ST'] = self.adata.obs['Cell_subtype_ST'].astype("category").cat.remove_unused_categories()
+        subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
+        self.adata.obs['Cell_type_ST'] = self.adata.obs[cell_subtype].map(subtype_to_type)
 
     def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)

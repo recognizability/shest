@@ -78,7 +78,6 @@ class Dataset():
         print('Common', len(self.cell_ids), "cells are selected.")
 
         self.adata = self.adata_raw[self.cell_ids, :].copy()
-        print(self.adata.obs[self.cell_type].value_counts())
         self.cell_type_encoded = self.cell_type + '_encoded'
         self.label_encoder = config.label_encoder
         self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
@@ -86,8 +85,8 @@ class Dataset():
         self.classes = config.classes
 
         cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
-        self.expressions = self.adata.X[cell_indices].toarray().astype(np.float32)
-        self.labels = self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64)
+        self.expressions = torch.from_numpy(self.adata.X[cell_indices].toarray()).float()
+        self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
 
     def __len__(self):
         return len(self.cell_ids) * len(self.angles)
@@ -106,25 +105,27 @@ class Dataset():
             image = image.float().div(255)
         else:
             image = transforms.ToTensor()(image)
+        image = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image)
 
-        expression = torch.from_numpy(self.expressions[base_i])
-        label = torch.tensor(self.labels[base_i], dtype=torch.long)
+        expression = self.expressions[base_i]
+        label = self.labels[base_i]
 
         return cell_id, image, expression, label
 
     def draw_umaps_expression(self):
-        fig, ax = plt.subplots(4, 2, figsize=(7, 12))
-        for i, cell_type in enumerate(['Cell_type_ST', 'Cell_type_HE', 'Cell_type_annotation', 'Cell_type']):
-            cell_types = self.adata_raw.obs[cell_type].value_counts().index.tolist()
+        fig, ax = plt.subplots(5, 2, figsize=(10, 16))
+        for i, cell_type in enumerate(['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type_annotation', 'Cell_type']):
+            index = self.cell_subtypes if cell_type == 'Cell_subtype_ST' else self.cell_types.keys()
+            palette = self.palette_subtype if cell_type == 'Cell_subtype_ST' else self.palette_type
             ax[i][0] = sns.barplot(
-               pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(self.cell_types.keys()).T,
+               pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(index).T,
                orient = 'h',
-               palette = self.palette_type,
+               palette = palette,
                ax=ax[i][0]
             )
             for container in ax[i][0].containers:
                 ax[i][0].bar_label(container)
-            sc.pl.umap(self.adata_raw, color=cell_type, palette=self.palette_type, ax=ax[i][1], show=False, legend_loc=None)
+            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i][1], show=False, legend_loc=None)
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
         plt.close()
@@ -132,15 +133,15 @@ class Dataset():
     def loader(self, split=0.8):
         total = len(self)
         if split==1 or split==0:
-            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
             return data_loader
         else:
             train_size = int(split * total)
             test_size = total - train_size
             train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
             print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
-            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True)
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
             return train_loader, test_loader
 
 class Encoder(nn.Module):
@@ -179,9 +180,9 @@ class Reconstructor(nn.Module):
         self.fc2 = nn.Linear(hidden, hidden)
         self.bn2 = nn.BatchNorm1d(hidden)
         self.do2 = nn.Dropout(dropout)
-        self.fc_mu = nn.Linear(hidden, out_features)
-        self.fc_alpha = nn.Linear(hidden, out_features)
-        self.fc_pi = nn.Linear(hidden, out_features)
+        self.fc_mean = nn.Linear(hidden, out_features)
+        self.fc_overdispersion = nn.Linear(hidden, out_features)
+        self.fc_probability = nn.Linear(hidden, out_features)
 
         reset_parameters(self)
 
@@ -191,10 +192,10 @@ class Reconstructor(nn.Module):
         x = self.do1(x)
         x = F.relu(self.bn2(self.fc2(x)))        
         x = self.do2(x)
-        mu = F.softplus(self.fc_mu(x))
-        alpha = F.softplus(self.fc_alpha(x))
-        pi = torch.sigmoid(self.fc_pi(x))
-        return mu, alpha, pi
+        mean = F.softplus(self.fc_mean(x))
+        overdispersion = F.softplus(self.fc_overdispersion(x))
+        probability = F.relu(self.fc_overdispersion(x))
+        return mean, overdispersion, probability
 
 class Classifier(nn.Module):
     def __init__(self, out_features, in_features=in_features):
@@ -229,29 +230,43 @@ class Model(nn.Module):
         self.classifier = Classifier(out_features=n_classes)
 
     def forward(self, x):
-        x = self.encoder(x)
-        mu, alpha, pi = self.reconstructor(x)
-        logits = self.classifier(x)
-        return mu, alpha, pi, logits
+        embedding = self.encoder(x)
+        mean, overdispersion, probability = self.reconstructor(embedding)
+        logits = self.classifier(embedding)
+        return embedding, mean, overdispersion, probability, logits
 
-class ZINBLoss(nn.Module):
+#class NegativeBinomialLoss(nn.Module):
+#    def __init__(self, eps=1e-8):
+#        super().__init__()
+#        self.eps = eps
+#
+#    def forward(self, mean, overdispersion, target):
+#        mean = mean + self.eps
+#        overdispersion = overdispersion + self.eps
+#        total_count = 1.0 / overdispersion
+#        logits = mean.log() - (total_count + mean).log()
+#        nb = NegativeBinomial(total_count=total_count, logits=logits)
+#        loss = -nb.log_prob(target.float())
+#        return loss.mean()
+
+class ZeroInflatedNegativeBinomialLoss(nn.Module):
     def __init__(self, eps=1e-8):
         super().__init__()
         self.eps = eps
 
-    def forward(self, mu, alpha, pi, target):
-        mu = mu + self.eps
-        alpha = alpha + self.eps
-        pi = torch.clamp(pi, self.eps, 1 - self.eps)
-       
-        total_count = 1.0 / alpha
-        logits = mu.log() - (total_count + mu).log()
+    def forward(self, mean, overdispersion, probability, target):
+        mean = mean + self.eps
+        overdispersion = overdispersion + self.eps
+        probability = torch.clamp(probability, self.eps, 1-self.eps)
+
+        total_count = 1.0 / overdispersion
+        logits = mean.log() - (total_count + mean).log()
         nb = NegativeBinomial(total_count=total_count, logits=logits)
-        nb_log_prob = nb.log_prob(target)
+        nb_log_prob = nb.log_prob(target.float())
         
         zero_mask = (target < self.eps).float()
-        log_zero_prob = torch.log(pi + (1 - pi) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
-        log_nonzero_prob = torch.log(1 - pi + self.eps) + nb_log_prob #if target > 0
+        log_zero_prob = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
+        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb_log_prob #if target > 0
         loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
         return loss.mean()
 
@@ -262,6 +277,8 @@ class Modeling():
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
+        self.palette_subtype = config.palette_subtype
+        self.palette = self.palette_subtype if self.cell_type == 'Cell_subtype_ST' else self.palette_type
         self.angles = config.angles
         self.angles_string = '_'.join(map(str, self.angles))
         self.upper = args.upper
@@ -284,7 +301,7 @@ class Modeling():
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
 
-        self.criterion_reconstruction = ZINBLoss()
+        self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
         self.criterion_classification = nn.CrossEntropyLoss()
 
         self.images = None
@@ -319,42 +336,24 @@ class Modeling():
                     image = image.to(device, non_blocking=True)
                     expression = expression.to(device, non_blocking=True)
                     label = label.to(device, non_blocking=True)
-                    
-                    embedding = self.model.encoder(image)
+
+                    embedding, mean, overdispersion, probability, logit = self.model(image)
                     if torch.isnan(embedding).any():
                         print("nan found in embedding")
                         escape = True
                         break
-                    mu, alpha, pi = self.model.reconstructor(embedding)
-                    if torch.isnan(mu).any():
-                        print("nan found in mu")
-                        escape = True
-                        break
-                    if torch.isnan(alpha).any():
-                        print("nan found in alpha")
-                        escape = True
-                        break
-                    if torch.isnan(pi).any():
-                        print("nan found in pi")
-                        escape = True
-                        break
-                    logit = self.model.classifier(embedding)
-                    if torch.isnan(logit).any():
-                        print("nan found in logit")
-                        escape = True
-                        break
 
                     optimizer.zero_grad()
-                    loss_reconstruction = self.criterion_reconstruction(mu, alpha, pi, expression)
+                    loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
                     loss_classification = self.criterion_classification(logit, label)
                     loss = loss_reconstruction + loss_classification
                     loss.backward()
                     optimizer.step()
 
-                    train_loss_reconstruction += loss_reconstruction.item()
-                    train_loss_classification += loss_classification.item()
+                    train_loss_reconstruction += loss_reconstruction.detach()
+                    train_loss_classification += loss_classification.detach()
 
-                    del image, expression, label, embedding, mu, alpha, pi, logit
+                    del image, expression, label, embedding, mean, overdispersion, probability, logit
 
                 if escape:
                     break
@@ -412,26 +411,24 @@ class Modeling():
                 expression = expression.to(device, non_blocking=True)
                 label = label.to(device, non_blocking=True)
 
-                embedding = self.model.encoder(image)
-                mu, alpha, pi = self.model.reconstructor(embedding)
-                logit = self.model.classifier(embedding)
+                embedding, mean, overdispersion, probability, logit = self.model(image)
                 prediction = torch.argmax(logit, dim=1)
 
-                loss_reconstruction = self.criterion_reconstruction(mu, alpha, pi, expression)
+                loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
                 loss_classification = self.criterion_classification(logit, label)
 
-                test_loss_reconstruction += loss_reconstruction.item()
-                test_loss_classification += loss_classification.item()
+                test_loss_reconstruction += loss_reconstruction.detach()
+                test_loss_classification += loss_classification.detach()
 
                 images.append(image.view(image.shape[0], -1).detach().cpu())
                 expressions.append(expression.detach().cpu())
                 labels.append(label.detach().cpu())
                 embeddings.append(embedding.detach().cpu())
-                reconstruction = mu
+                reconstruction = mean
                 reconstructions.append(reconstruction.detach().cpu())
                 predictions.append(prediction.detach().cpu())
 
-                del image, expression, label, embedding, mu, alpha, pi, logit, reconstruction, prediction
+                del image, expression, label, embedding, mean, overdispersion, probability, logit, reconstruction, prediction
                 
         print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(self.test_loader):.5f}")
         print(f"Test Loss of classification: {test_loss_classification / len(self.test_loader):.5f}")
@@ -476,7 +473,7 @@ class Modeling():
         }
 
         fig, ax = plt.subplots(1, len(umaps), figsize=(13, 3))
-        colors = [self.palette_type[cell_type] for cell_type in self.labels]
+        colors = [self.palette[cell_type] for cell_type in self.labels]
         
         for i, (title, coordinate) in enumerate(umaps.items()):
             ax[i].scatter(coordinate[:, 0], coordinate[:, 1], c=colors, s=1)
@@ -484,8 +481,8 @@ class Modeling():
             ax[i].set_xticks([])
             ax[i].set_yticks([])
         
-        markers = [plt.Line2D([0,0],[0,0], color=color, marker='o', linestyle='') for color in self.palette_type.values()]
-        plt.legend(markers, self.palette_type.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
+        markers = [plt.Line2D([0,0],[0,0], color=color, marker='o', linestyle='') for color in self.palette.values()]
+        plt.legend(markers, self.palette.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.suffix}.png", bbox_inches="tight")
@@ -522,8 +519,8 @@ class Modeling():
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type)
 
         cell_type_order = adata_actual.obs[self.cell_type].cat.categories.tolist()
-        adata_actual.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
-        adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette_type[cell_type] for cell_type in cell_type_order]
+        adata_actual.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
+        adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
 
         sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True, show_gene_labels=True)
         plt.tight_layout()
@@ -578,8 +575,9 @@ class Modeling():
         print(f"Inferring with the {self.cell_type} prediction model ...")
         with torch.no_grad():
             for cell_id, image in tqdm(inference_loader):
-                cell_ids.extend(cell_id)
                 image = image.to(device, non_blocking=True)
+
+                cell_ids.extend(cell_id)
                 embedding = self.model.encoder(image)
                 logit = self.model.classifier(embedding)
                 prediction = torch.argmax(logit, dim=1)
