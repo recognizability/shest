@@ -174,13 +174,14 @@ class Reconstructor(nn.Module):
         dropout = 0.3
         self.bn0 = nn.BatchNorm1d(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
-        self.do1 = nn.Dropout(dropout)
         self.bn1 = nn.BatchNorm1d(hidden)
+        self.do1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden, hidden)
-        self.do2 = nn.Dropout(dropout)
         self.bn2 = nn.BatchNorm1d(hidden)
+        self.do2 = nn.Dropout(dropout)
         self.fc_mu = nn.Linear(hidden, out_features)
         self.fc_alpha = nn.Linear(hidden, out_features)
+        self.fc_pi = nn.Linear(hidden, out_features)
 
         reset_parameters(self)
 
@@ -192,20 +193,32 @@ class Reconstructor(nn.Module):
         x = self.do2(x)
         mu = F.softplus(self.fc_mu(x))
         alpha = F.softplus(self.fc_alpha(x))
-        return mu, alpha
+        pi = torch.sigmoid(self.fc_pi(x))
+        return mu, alpha, pi
 
 class Classifier(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
+        hidden = 2048
         dropout = 0.3
-        self.bn = nn.BatchNorm1d(in_features)
-        self.fc = nn.Linear(in_features, out_features)
+        self.bn0 = nn.BatchNorm1d(in_features)
+        self.fc1 = nn.Linear(in_features, hidden)
+        self.bn1 = nn.BatchNorm1d(hidden)
+        self.do1 = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(hidden, hidden)
+        self.bn2 = nn.BatchNorm1d(hidden)
+        self.do2 = nn.Dropout(dropout)
+        self.fc3 = nn.Linear(hidden, out_features)
 
         reset_parameters(self)
 
     def forward(self, x):
-        x = self.bn(x)
-        x = self.fc(x)
+        x = self.bn0(x)
+        x = F.relu(self.bn1(self.fc1(x)))
+        x = self.do1(x)
+        x = F.relu(self.bn2(self.fc2(x)))        
+        x = self.do2(x)
+        x = self.fc3(x)
         return x
 
 class Model(nn.Module):
@@ -217,21 +230,30 @@ class Model(nn.Module):
 
     def forward(self, x):
         x = self.encoder(x)
-        mu, alpha = self.reconstructor(x)
+        mu, alpha, pi = self.reconstructor(x)
         logits = self.classifier(x)
-        return mu, alpha, logits
+        return mu, alpha, pi, logits
 
-class NegativeBinomialLoss(nn.Module):
-   def __init__(self, eps=1e-8):
-       super().__init__()
-       self.eps = eps
+class ZINBLoss(nn.Module):
+    def __init__(self, eps=1e-8):
+        super().__init__()
+        self.eps = eps
 
-   def forward(self, mu, alpha, target):
-       total_count = 1.0 / alpha
-       logits = (mu + self.eps).log() - (total_count + mu + self.eps).log()
-       nb = NegativeBinomial(total_count=total_count, logits=logits)
-       loss = -nb.log_prob(target.float())
-       return loss.mean()
+    def forward(self, mu, alpha, pi, target):
+        mu = mu + self.eps
+        alpha = alpha + self.eps
+        pi = torch.clamp(pi, self.eps, 1 - self.eps)
+       
+        total_count = 1.0 / alpha
+        logits = mu.log() - (total_count + mu).log()
+        nb = NegativeBinomial(total_count=total_count, logits=logits)
+        nb_log_prob = nb.log_prob(target)
+        
+        zero_mask = (target < self.eps).float()
+        log_zero_prob = torch.log(pi + (1 - pi) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
+        log_nonzero_prob = torch.log(1 - pi + self.eps) + nb_log_prob #if target > 0
+        loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
+        return loss.mean()
 
 class Modeling():
     def __init__(self, args, config):
@@ -262,7 +284,7 @@ class Modeling():
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
 
-        self.criterion_reconstruction = NegativeBinomialLoss()
+        self.criterion_reconstruction = ZINBLoss()
         self.criterion_classification = nn.CrossEntropyLoss()
 
         self.images = None
@@ -303,13 +325,17 @@ class Modeling():
                         print("nan found in embedding")
                         escape = True
                         break
-                    mu, alpha = self.model.reconstructor(embedding)
+                    mu, alpha, pi = self.model.reconstructor(embedding)
                     if torch.isnan(mu).any():
                         print("nan found in mu")
                         escape = True
                         break
                     if torch.isnan(alpha).any():
                         print("nan found in alpha")
+                        escape = True
+                        break
+                    if torch.isnan(pi).any():
+                        print("nan found in pi")
                         escape = True
                         break
                     logit = self.model.classifier(embedding)
@@ -319,7 +345,7 @@ class Modeling():
                         break
 
                     optimizer.zero_grad()
-                    loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
+                    loss_reconstruction = self.criterion_reconstruction(mu, alpha, pi, expression)
                     loss_classification = self.criterion_classification(logit, label)
                     loss = loss_reconstruction + loss_classification
                     loss.backward()
@@ -328,7 +354,7 @@ class Modeling():
                     train_loss_reconstruction += loss_reconstruction.item()
                     train_loss_classification += loss_classification.item()
 
-                    del image, expression, label, embedding, mu, alpha, logit
+                    del image, expression, label, embedding, mu, alpha, pi, logit
 
                 if escape:
                     break
@@ -387,11 +413,11 @@ class Modeling():
                 label = label.to(device, non_blocking=True)
 
                 embedding = self.model.encoder(image)
-                mu, alpha = self.model.reconstructor(embedding)
+                mu, alpha, pi = self.model.reconstructor(embedding)
                 logit = self.model.classifier(embedding)
                 prediction = torch.argmax(logit, dim=1)
 
-                loss_reconstruction = self.criterion_reconstruction(mu, alpha, expression)
+                loss_reconstruction = self.criterion_reconstruction(mu, alpha, pi, expression)
                 loss_classification = self.criterion_classification(logit, label)
 
                 test_loss_reconstruction += loss_reconstruction.item()
@@ -405,7 +431,7 @@ class Modeling():
                 reconstructions.append(reconstruction.detach().cpu())
                 predictions.append(prediction.detach().cpu())
 
-                del image, expression, label, embedding, mu, alpha, logit, reconstruction, prediction
+                del image, expression, label, embedding, mu, alpha, pi, logit, reconstruction, prediction
                 
         print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(self.test_loader):.5f}")
         print(f"Test Loss of classification: {test_loss_classification / len(self.test_loader):.5f}")
@@ -533,7 +559,7 @@ class Modeling():
         ax[0].set_ylabel('Label')
 
         cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        sns.heatmap(cm_normalized, annot=True, fmt='.2f', xticklabels=self.classes, yticklabels=self.classes, ax=ax[1])
+        sns.heatmap(cm_normalized, annot=True, fmt='.3f', xticklabels=self.classes, yticklabels=self.classes, ax=ax[1])
         f1_macro = f1_score(self.labels, self.predictions, average='macro')
         print('Macro F1 score', f1_macro)
         ax[1].set_title(f"{self.cell_type} (macro f1: {f1_macro:.4f})")

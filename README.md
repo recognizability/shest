@@ -12,7 +12,7 @@
 
 ```
 usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE]
-               [--sample SAMPLE] [--upper UPPER] [--filter] [--cell_type CELL_TYPE] [--sc_annotate] [--resave]
+               [--sample SAMPLE] [--upper UPPER] [--filter] [--cell_type CELL_TYPE] [--sc_annotate]
                [--batch_size BATCH_SIZE] [--rotate] [--epochs EPOCHS] [--lr LR] [--train]
 
 Sample information and hyperparameters
@@ -32,11 +32,10 @@ options:
   --cell_type CELL_TYPE
                         Cell type to consider (default: Cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)
-  --resave              Force resave a torch tensor from H&E images of the cells (default: False)
   --batch_size BATCH_SIZE
                         Batch size of data loader (default: 128)
   --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
-  --epochs EPOCHS       Number of epochs in training (default: 40)
+  --epochs EPOCHS       Number of epochs in training (default: 30)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --train               Force training the model (default: False)
 ```
