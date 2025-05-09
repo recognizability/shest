@@ -33,9 +33,9 @@ options:
                         Cell type to consider (default: Cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)
   --batch_size BATCH_SIZE
-                        Batch size of data loader (default: 128)
+                        Batch size of data loader (default: 256)
   --rotate              Rotate the images in 0, 90, 180 and 270 degree (default: False)
-  --epochs EPOCHS       Number of epochs in training (default: 30)
+  --epochs EPOCHS       Number of epochs in training (default: 40)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --train               Force training the model (default: False)
 ```
