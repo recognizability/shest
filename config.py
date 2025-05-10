@@ -54,8 +54,10 @@ cell_types = {
             'Endothelial cell lymphatic',
             'Endothelial cell venous',
         ],
-        'Lymphocyte': [
+        'Plasma_cell': [
              'Plasma cell',
+        ],
+        'Lymphocyte': [
              'B cell',
              'T cell regulatory',
              'T cell CD4',
@@ -88,10 +90,10 @@ class Config:
         ))
 
         self.label_encoder = LabelEncoder()
-        if args.cell_type == 'Cell_type' or args.cell_type == 'Cell_type_ST' or args.cell_type == 'Cell_type_HE':
-            parameters = list(self.cell_types.keys())
-        elif args.cell_type == 'Cell_subtype_ST':
+        if 'subtype' in args.cell_type:
             parameters =  self.cell_subtypes
+        else:
+            parameters = list(self.cell_types.keys())
         self.label_encoder.fit(parameters)
         self.label_encoder.classes_ = np.array(parameters)
         self.classes = self.label_encoder.classes_

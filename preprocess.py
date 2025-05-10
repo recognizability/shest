@@ -33,6 +33,7 @@ class Preprocessing():
         self.sc_annotate = args.sc_annotate
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
+        self.subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower = 4 #micrometers
@@ -114,10 +115,9 @@ class Preprocessing():
 
         self.adata.obs.index = self.adata.obs['cell_id']
         inclusion = self.adata.obs[cell_subtype].isin(self.cell_subtypes)
-        self.adata.obs.loc[inclusion, 'Cell_subtype_ST'] = self.adata.obs.loc[inclusion, cell_subtype]
-        self.adata.obs['Cell_subtype_ST'] = self.adata.obs['Cell_subtype_ST'].astype("category").cat.remove_unused_categories()
-        subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
-        self.adata.obs['Cell_type_ST'] = self.adata.obs[cell_subtype].map(subtype_to_type)
+        self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, cell_subtype]
+        self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes)
+        self.adata.obs['cell_type_expression'] = self.adata.obs[cell_subtype].map(self.subtype_to_type)
 
     def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)
@@ -137,11 +137,11 @@ class Preprocessing():
         bounds = self.cell_boundaries.bounds
         bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
         bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
-        bounds = bounds.merge(self.adata.obs['Cell_type_ST'], how='left', left_index=True, right_index=True)
-        bounds_melted = bounds.melt(id_vars='Cell_type_ST', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
+        bounds = bounds.merge(self.adata.obs['cell_type_expression'], how='left', left_index=True, right_index=True)
+        bounds_melted = bounds.melt(id_vars='cell_type_expression', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
 
         fig = plt.figure(figsize=(4, 4))
-        sns.violinplot(bounds_melted, x='Length_(μm)', y='Cell_type_ST', hue='Length', split=True, inner='quart', order=list(self.cell_types.keys()))
+        sns.violinplot(bounds_melted, x='Length_(μm)', y='cell_type_expression', hue='Length', split=True, inner='quart', order=list(self.cell_types.keys()))
         plt.axvline(x=self.upper, linestyle='--', color='gray')
         plt.axvline(x=self.lower, linestyle='--', color='gray')
         fig.tight_layout()
@@ -182,22 +182,23 @@ class Preprocessing():
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
-        he_annotation['Cell_type_HE'] = he_annotation['group'].astype(str)
-        he_annotation.loc[he_annotation['Cell_type_HE'] == 'Plasma_cell', 'Cell_type_HE'] = 'Lymphocyte' #include the Plasma_cell into Lymphocyte
-        self.adata.obs = self.adata.obs.merge(he_annotation['Cell_type_HE'], how='left', left_index=True, right_index=True)
-        print(f"{len(self.adata.obs['Cell_type_HE'].dropna())} cells are annotated by thier morphologies.")
+        he_annotation['cell_type_morphology'] = he_annotation['group'].astype(str)
+        self.adata.obs = self.adata.obs.merge(he_annotation['cell_type_morphology'], how='left', left_index=True, right_index=True)
+        print(f"{len(self.adata.obs['cell_type_morphology'].dropna())} cells are annotated by thier morphologies.")
+        inclusion_morphology = self.adata.obs['cell_type_morphology'].notna()
+        self.adata.obs.loc[inclusion_morphology, 'cell_subtype_morphology'] = self.adata.obs.loc[inclusion_morphology, 'cell_subtype_expression']
 
-        self.adata.obs['Cell_type_annotation'] = self.adata.obs.loc[
-            self.adata.obs['Cell_type_ST'].astype(str) == self.adata.obs['Cell_type_HE'].astype(str), 
-            'Cell_type_HE'
-        ]
-        self.annotated_cell_ids = self.adata.obs[self.adata.obs['Cell_type_annotation'].notna()].index
+        inclusion_annotation = self.adata.obs['cell_type_expression'].astype(str) == self.adata.obs['cell_type_morphology'].astype(str)
+        self.adata.obs.loc[inclusion_annotation, 'cell_type_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_type_morphology']
+        self.annotated_cell_ids = self.adata.obs[self.adata.obs['cell_type_annotation'].notna()].index
         print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
+        self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_morphology']
 
         self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
         print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
-        self.adata.obs['Cell_type'] = self.adata.obs['Cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+        self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+        self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
 
-        self.adata.obs = self.adata.obs[['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type_annotation', 'Cell_type']]
+        self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_subtype_morphology', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
         self.adata.raw = self.adata
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')

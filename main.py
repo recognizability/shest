@@ -16,9 +16,9 @@ if __name__ == "__main__":
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
     parser.add_argument("--upper", type=int, default=18, help="Upper limit of the one side length of the bounding rectangle of a cell within an H&E image (in micrometers)")
     parser.add_argument("--filter", action="store_true", help="Force filtration by the cell area")
-    parser.add_argument("--cell_type", type=str, default="Cell_type", help="Cell type to consider")
+    parser.add_argument("--cell_type", type=str, default="cell_type", help="Cell type to consider")
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size of data loader")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size of data loader")
     parser.add_argument("--rotate", action="store_true", help="Rotate the images in 0, 90, 180 and 270 degree")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
@@ -32,6 +32,7 @@ if __name__ == "__main__":
 
     modeling = Modeling(args, config)
     modeling.evaluate()
-    modeling.draw_heatmap()
     modeling.draw_confusion_matrix()
-    modeling.draw_umaps_embedding()
+    if not 'subtype' in args.cell_type:
+        modeling.draw_heatmap()
+        modeling.draw_umaps_embedding()

@@ -113,35 +113,57 @@ class Dataset():
         return cell_id, image, expression, label
 
     def draw_umaps_expression(self):
-        fig, ax = plt.subplots(5, 2, figsize=(10, 16))
-        for i, cell_type in enumerate(['Cell_subtype_ST', 'Cell_type_ST', 'Cell_type_HE', 'Cell_type_annotation', 'Cell_type']):
-            index = self.cell_subtypes if cell_type == 'Cell_subtype_ST' else self.cell_types.keys()
-            palette = self.palette_subtype if cell_type == 'Cell_subtype_ST' else self.palette_type
-            ax[i][0] = sns.barplot(
-               pd.DataFrame(self.adata_raw.obs.groupby(cell_type).apply(len, include_groups=False), columns=['']).reindex(index).T,
+        cell_types = self.adata_raw.obs.columns
+#        fig, ax = plt.subplots(4, len(cell_types)//2, figsize=(2*len(cell_types), 20))
+        fig, ax = plt.subplots(
+            nrows=4,
+            ncols=4,
+            figsize=(6+6+6+6, 6+4+2+4),
+            gridspec_kw={
+                'width_ratios': [1, 1, 1, 1],
+                'height_ratios': [1.5, 1, 0.5, 1]
+            }
+        )
+        indices = {'expression':0, 'morphology':1, 'annotation':2}
+        for cell_type in cell_types:
+            if 'subtype' in cell_type:
+                reindex = self.cell_subtypes
+                palette = self.palette_subtype
+                i = 0
+            else:
+                reindex = self.cell_types.keys()
+                palette = self.palette_type
+                i = 2
+            j = next((index for string, index in indices.items() if string in cell_type), 3)
+            counts = pd.DataFrame(self.adata_raw.obs.groupby(cell_type, observed=False).apply(len, include_groups=False), columns=['']).reindex(reindex).T
+            ax[i][j] = sns.barplot(
+               counts,
                orient = 'h',
                palette = palette,
-               ax=ax[i][0]
+               ax=ax[i][j]
             )
-            for container in ax[i][0].containers:
-                ax[i][0].bar_label(container)
-            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i][1], show=False, legend_loc=None)
+            ax[i][j].set_xlim(0, counts.max(axis=None)*1.2)
+            ax[i][j].set_title(f"n={counts.sum(axis=1).values[0]}")
+            for container in ax[i][j].containers:
+                ax[i][j].bar_label(container)
+            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None)
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
         plt.close()
 
     def loader(self, split=0.8):
         total = len(self)
+        prefetch_factor = 32
         if split==1 or split==0:
-            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
             return data_loader
         else:
             train_size = int(split * total)
             test_size = total - train_size
             train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
             print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
-            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
             return train_loader, test_loader
 
 class Encoder(nn.Module):
@@ -235,20 +257,6 @@ class Model(nn.Module):
         logits = self.classifier(embedding)
         return embedding, mean, overdispersion, probability, logits
 
-#class NegativeBinomialLoss(nn.Module):
-#    def __init__(self, eps=1e-8):
-#        super().__init__()
-#        self.eps = eps
-#
-#    def forward(self, mean, overdispersion, target):
-#        mean = mean + self.eps
-#        overdispersion = overdispersion + self.eps
-#        total_count = 1.0 / overdispersion
-#        logits = mean.log() - (total_count + mean).log()
-#        nb = NegativeBinomial(total_count=total_count, logits=logits)
-#        loss = -nb.log_prob(target.float())
-#        return loss.mean()
-
 class ZeroInflatedNegativeBinomialLoss(nn.Module):
     def __init__(self, eps=1e-8):
         super().__init__()
@@ -262,11 +270,10 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
         total_count = 1.0 / overdispersion
         logits = mean.log() - (total_count + mean).log()
         nb = NegativeBinomial(total_count=total_count, logits=logits)
-        nb_log_prob = nb.log_prob(target.float())
         
-        zero_mask = (target < self.eps).float()
         log_zero_prob = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
-        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb_log_prob #if target > 0
+        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb.log_prob(target.float()) #if target > 0
+        zero_mask = (target < self.eps).float()
         loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
         return loss.mean()
 
