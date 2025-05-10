@@ -98,5 +98,3 @@ class Config:
         self.label_encoder.classes_ = np.array(parameters)
         self.classes = self.label_encoder.classes_
         print('The classes are:', self.classes)
-    
-        self.angles = [0, 90, 180, 270] if args.rotate else [0]

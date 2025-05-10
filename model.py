@@ -59,7 +59,6 @@ class Dataset():
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.batch_size = args.batch_size
-        self.angles = config.angles
         self.stem_file = config.stem_file
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
@@ -89,17 +88,12 @@ class Dataset():
         self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
 
     def __len__(self):
-        return len(self.cell_ids) * len(self.angles)
+        return len(self.cell_ids)
 
     def __getitem__(self, i):
-        base_i = i // len(self.angles)
-        angle_i = i % len(self.angles)
-
-        cell_id = self.cell_ids[base_i]
-        angle = self.angles[angle_i]
+        cell_id = self.cell_ids[i]
 
         image = self.images[self.image_ids[cell_id]]
-        image = transforms.functional.rotate(image, angle)
         image = transforms.Resize((224, 224))(image)
         if isinstance(image, torch.Tensor):
             image = image.float().div(255)
@@ -107,8 +101,8 @@ class Dataset():
             image = transforms.ToTensor()(image)
         image = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image)
 
-        expression = self.expressions[base_i]
-        label = self.labels[base_i]
+        expression = self.expressions[i]
+        label = self.labels[i]
 
         return cell_id, image, expression, label
 
@@ -154,18 +148,46 @@ class Dataset():
 
     def loader(self, split=0.8):
         total = len(self)
-        prefetch_factor = 32
         if split==1 or split==0:
-            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
             return data_loader
         else:
             train_size = int(split * total)
             test_size = total - train_size
             train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
             print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
-            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, num_workers=n_cores, pin_memory=True, prefetch_factor=prefetch_factor, persistent_workers=True)
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
             return train_loader, test_loader
+
+#class Encoder(nn.Module):
+#    def __init__(self, backbone="vit_b_16"):
+#        super().__init__()
+#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
+#        for param in self.encoder.parameters():
+#            param.requires_grad = False
+#        for param in self.encoder.heads.parameters():
+#            param.requires_grad = True #for only the last heads
+#
+#        grid_size = int(224 // 16)
+#        coords = torch.linspace(-1, 1, steps=grid_size)
+#        yy, xx = torch.meshgrid(coords, coords, indexing='ij')
+#        initial_weight = ((xx**2 + yy**2 - 2) / 2)**2
+#        initial_weight = initial_weight.view(1, -1, 1)
+#        self.weight = nn.Parameter(initial_weight)
+#
+#    def forward(self, x):
+#        x = self.encoder._process_input(x)
+#        n, h, w = x.shape
+#
+#        x = x * self.weight.to(x.device)
+#
+#        batch_class_token = self.encoder.class_token.expand(n, -1, -1)
+#        x = torch.cat([batch_class_token, x], dim=1)
+#        x = self.encoder.encoder(x)
+#        x = x[:, 0]
+#        x = self.encoder.heads(x)
+#        return x
 
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16"):
@@ -178,6 +200,22 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         return self.encoder(x)
+#        x = self.encoder._process_input(x)
+#        n, h, w = x.shape
+#
+#        grid_size = int(h ** 0.5)
+#        coords = torch.linspace(-1, 1, steps=grid_size)
+#        yy, xx = torch.meshgrid(coords, coords, indexing='ij')
+#        weight = ((xx**2 + yy**2 - 2) / 2)**2
+#        weight = weight.view(1, -1, 1).to(x.device)
+#        x = x * weight
+#
+#        batch_class_token = self.encoder.class_token.expand(n, -1, -1)
+#        x = torch.cat([batch_class_token, x], dim=1)
+#        x = self.encoder.encoder(x)
+#        x = x[:, 0]
+#        x = self.encoder.heads(x)
+#        return x
 
 def reset_parameters(module):
     for m in module.modules():
@@ -185,7 +223,7 @@ def reset_parameters(module):
             nn.init.kaiming_uniform_(m.weight, nonlinearity='relu', generator=generator)
             if m.bias is not None:
                 nn.init.zeros_(m.bias)
-        elif isinstance(m, nn.BatchNorm1d):
+        elif isinstance(m, nn.LayerNorm) or isinstance(m, nn.BatchNorm1d):
             if m.weight is not None:
                 nn.init.ones_(m.weight)
             if m.bias is not None:
@@ -196,13 +234,13 @@ class Reconstructor(nn.Module):
         super().__init__()
         hidden = 4096
         dropout = 0.3
-        self.bn0 = nn.BatchNorm1d(in_features)
+        self.norm0 = nn.BatchNorm1d(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
-        self.bn1 = nn.BatchNorm1d(hidden)
-        self.do1 = nn.Dropout(dropout)
+        self.norm1 = nn.BatchNorm1d(hidden)
+        self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden, hidden)
-        self.bn2 = nn.BatchNorm1d(hidden)
-        self.do2 = nn.Dropout(dropout)
+        self.norm2 = nn.BatchNorm1d(hidden)
+        self.dropout2 = nn.Dropout(dropout)
         self.fc_mean = nn.Linear(hidden, out_features)
         self.fc_overdispersion = nn.Linear(hidden, out_features)
         self.fc_probability = nn.Linear(hidden, out_features)
@@ -210,14 +248,14 @@ class Reconstructor(nn.Module):
         reset_parameters(self)
 
     def forward(self, x):
-        x = self.bn0(x)
-        x = F.relu(self.bn1(self.fc1(x)))
-        x = self.do1(x)
-        x = F.relu(self.bn2(self.fc2(x)))        
-        x = self.do2(x)
+        x = self.norm0(x)
+        x = F.relu(self.norm1(self.fc1(x)))
+        x = self.dropout1(x)
+        x = F.relu(self.norm2(self.fc2(x)))        
+        x = self.dropout2(x)
         mean = F.softplus(self.fc_mean(x))
         overdispersion = F.softplus(self.fc_overdispersion(x))
-        probability = F.relu(self.fc_overdispersion(x))
+        probability = F.relu(self.fc_probability(x))
         return mean, overdispersion, probability
 
 class Classifier(nn.Module):
@@ -225,23 +263,23 @@ class Classifier(nn.Module):
         super().__init__()
         hidden = 2048
         dropout = 0.3
-        self.bn0 = nn.BatchNorm1d(in_features)
+        self.norm0 = nn.BatchNorm1d(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
-        self.bn1 = nn.BatchNorm1d(hidden)
-        self.do1 = nn.Dropout(dropout)
+        self.norm1 = nn.BatchNorm1d(hidden)
+        self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden, hidden)
-        self.bn2 = nn.BatchNorm1d(hidden)
-        self.do2 = nn.Dropout(dropout)
+        self.norm2 = nn.BatchNorm1d(hidden)
+        self.dropout2 = nn.Dropout(dropout)
         self.fc3 = nn.Linear(hidden, out_features)
 
         reset_parameters(self)
 
     def forward(self, x):
-        x = self.bn0(x)
-        x = F.relu(self.bn1(self.fc1(x)))
-        x = self.do1(x)
-        x = F.relu(self.bn2(self.fc2(x)))        
-        x = self.do2(x)
+        x = self.norm0(x)
+        x = F.relu(self.norm1(self.fc1(x)))
+        x = self.dropout1(x)
+        x = F.relu(self.norm2(self.fc2(x)))        
+        x = self.dropout2(x)
         x = self.fc3(x)
         return x
 
@@ -287,11 +325,9 @@ class Modeling():
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.palette = self.palette_subtype if self.cell_type == 'Cell_subtype_ST' else self.palette_type
-        self.angles = config.angles
-        self.angles_string = '_'.join(map(str, self.angles))
         self.upper = args.upper
         self.upper_string = f"upper{args.upper}"
-        self.suffix = f"{self.upper_string}_{self.cell_type}_{self.angles_string}"
+        self.suffix = f"{self.upper_string}_{self.cell_type}"
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
@@ -370,24 +406,24 @@ class Modeling():
                 average_loss_classification = train_loss_classification / len(self.train_loader)
                 print(f"Epoch: {epoch+1}/{self.epochs}, reconstruction loss: {average_loss_reconstruction:.5f}, classification loss: {average_loss_classification:.5f}")
 
-                if epoch >= 20:
-                    torch.save(self.model.state_dict(), model_file)
+                epsilon = 0.0001
+                if best_loss_reconstruction == float('inf') or (best_loss_reconstruction - average_loss_reconstruction) / best_loss_reconstruction >= epsilon:
+                    best_loss_reconstruction = average_loss_reconstruction
+                else:
+                    counter += 1
+                    print(f"Early stopping counter is updated as {counter}/{patience} by the reconstruction loss")
 
-                    if best_loss_reconstruction == float('inf') or (best_loss_reconstruction - average_loss_reconstruction) / best_loss_reconstruction >= 0.001:
-                        best_loss_reconstruction = average_loss_reconstruction
-                    else:
-                        counter += 1
-                        print(f"Early stopping counter is updated as {counter}/{patience} by the reconstruction loss")
+                if best_loss_classification == float('inf') or (best_loss_classification - average_loss_classification) / best_loss_classification >= epsilon:
+                    best_loss_classification = average_loss_classification
+                else:
+                    counter += 1
+                    print(f"Early stopping counter is updated as {counter}/{patience} by the classification loss")
 
-                    if best_loss_classification == float('inf') or (best_loss_classification - average_loss_classification) / best_loss_classification >= 0.001:
-                        best_loss_classification = average_loss_classification
-                    else:
-                        counter += 1
-                        print(f"Early stopping counter is updated as {counter}/{patience} by the classification loss")
+                if counter >= patience:
+                    print("The training is stopped eraly.")
+                    break
 
-                    if counter >= patience:
-                        print("The training is stopped eraly.")
-                        break
+            torch.save(self.model.state_dict(), model_file)
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -558,7 +594,7 @@ class Modeling():
         cm = confusion_matrix(self.labels, self.predictions, labels=self.classes)
         sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes, ax=ax[0])
         f1_weighted = f1_score(self.labels, self.predictions, average='weighted')
-        print('Weighted F1 score', f1_weighted)
+        print(f'Weighted F1 score:, {f1_weighted:.5f}')
         ax[0].set_title(f"{self.cell_type} (weighted f1: {f1_weighted:.4f})")
         ax[0].set_xlabel('Prediction')
         ax[0].set_ylabel('Label')
@@ -566,7 +602,7 @@ class Modeling():
         cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
         sns.heatmap(cm_normalized, annot=True, fmt='.3f', xticklabels=self.classes, yticklabels=self.classes, ax=ax[1])
         f1_macro = f1_score(self.labels, self.predictions, average='macro')
-        print('Macro F1 score', f1_macro)
+        print(f'Macro F1 score: {f1_macro:.5f}')
         ax[1].set_title(f"{self.cell_type} (macro f1: {f1_macro:.4f})")
         ax[1].set_xlabel('Prediction')
         ax[1].set_ylabel('Label')
