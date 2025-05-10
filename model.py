@@ -114,7 +114,6 @@ class Dataset():
 
     def draw_umaps_expression(self):
         cell_types = self.adata_raw.obs.columns
-#        fig, ax = plt.subplots(4, len(cell_types)//2, figsize=(2*len(cell_types), 20))
         fig, ax = plt.subplots(
             nrows=4,
             ncols=4,
@@ -124,6 +123,8 @@ class Dataset():
                 'height_ratios': [1.5, 1, 0.5, 1]
             }
         )
+        ax[0][1].axis('off')
+        ax[1][1].axis('off')
         indices = {'expression':0, 'morphology':1, 'annotation':2}
         for cell_type in cell_types:
             if 'subtype' in cell_type:
@@ -193,7 +194,7 @@ def reset_parameters(module):
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 2048
+        hidden = 4096
         dropout = 0.3
         self.bn0 = nn.BatchNorm1d(in_features)
         self.fc1 = nn.Linear(in_features, hidden)

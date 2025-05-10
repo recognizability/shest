@@ -186,19 +186,18 @@ class Preprocessing():
         self.adata.obs = self.adata.obs.merge(he_annotation['cell_type_morphology'], how='left', left_index=True, right_index=True)
         print(f"{len(self.adata.obs['cell_type_morphology'].dropna())} cells are annotated by thier morphologies.")
         inclusion_morphology = self.adata.obs['cell_type_morphology'].notna()
-        self.adata.obs.loc[inclusion_morphology, 'cell_subtype_morphology'] = self.adata.obs.loc[inclusion_morphology, 'cell_subtype_expression']
 
         inclusion_annotation = self.adata.obs['cell_type_expression'].astype(str) == self.adata.obs['cell_type_morphology'].astype(str)
-        self.adata.obs.loc[inclusion_annotation, 'cell_type_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_type_morphology']
+        self.adata.obs.loc[inclusion_annotation, 'cell_type_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_type_expression']
         self.annotated_cell_ids = self.adata.obs[self.adata.obs['cell_type_annotation'].notna()].index
         print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
-        self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_morphology']
+        self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_expression']
 
         self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
         print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
         self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
         self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
 
-        self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_subtype_morphology', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
+        self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
         self.adata.raw = self.adata
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')
