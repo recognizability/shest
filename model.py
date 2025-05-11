@@ -239,7 +239,7 @@ class Reconstructor(nn.Module):
 class Classifier(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 2048
+        hidden = 512
         dropout = 0.3
         self.norm0 = nn.LayerNorm(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
