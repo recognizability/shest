@@ -241,12 +241,12 @@ class Classifier(nn.Module):
         super().__init__()
         hidden = 2048
         dropout = 0.3
-        self.norm0 = nn.BatchNorm1d(in_features)
+        self.norm0 = nn.LayerNorm(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
-        self.norm1 = nn.BatchNorm1d(hidden)
+        self.norm1 = nn.LayerNorm(hidden)
         self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden, hidden)
-        self.norm2 = nn.BatchNorm1d(hidden)
+        self.norm2 = nn.LayerNorm(hidden)
         self.dropout2 = nn.Dropout(dropout)
         self.fc3 = nn.Linear(hidden, out_features)
 
