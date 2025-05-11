@@ -90,11 +90,34 @@ class Dataset():
     def __len__(self):
         return len(self.cell_ids)
 
+    def _resize(self, image, size):
+        return F.interpolate(image.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze()
+
+    def _weight(self, steps):
+        coords = torch.linspace(-1, 1, steps=steps)
+        weight = ((coords[:, None]**2 + coords[None, :]**2 - 2) / 2)**2
+        return weight
+
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
+        image_raw = self.images[self.image_ids[cell_id]]
+        length = 224
+        half = length // 2
+        weight = self._weight(half).to(image_raw.device).unsqueeze(0)
+        image = torch.zeros(3, length, length, dtype=torch.uint8, device=image_raw.device)
+        tile =  image_raw.shape[1]// 3
 
-        image = self.images[self.image_ids[cell_id]]
-        image = transforms.Resize((224, 224))(image)
+        image_top_left = self._resize(image_raw, half)
+        image_top_right = image_top_left * weight
+        image_bottom_left = self._resize(image_raw[:, tile:2*tile, tile:2*tile], half)
+        image_bottom_right = image_bottom_left * weight
+
+        image = torch.zeros(3, length, length, dtype=torch.uint8, device=image_raw.device)
+        image[:, :half, :half] = image_top_left
+        image[:, :half, half:] = image_top_right
+        image[:, half:, :half] = image_bottom_left
+        image[:, half:, half:] = image_bottom_right
+
         if isinstance(image, torch.Tensor):
             image = image.float().div(255)
         else:
@@ -160,35 +183,6 @@ class Dataset():
             test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
             return train_loader, test_loader
 
-#class Encoder(nn.Module):
-#    def __init__(self, backbone="vit_b_16"):
-#        super().__init__()
-#        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
-#        for param in self.encoder.parameters():
-#            param.requires_grad = False
-#        for param in self.encoder.heads.parameters():
-#            param.requires_grad = True #for only the last heads
-#
-#        grid_size = int(224 // 16)
-#        coords = torch.linspace(-1, 1, steps=grid_size)
-#        yy, xx = torch.meshgrid(coords, coords, indexing='ij')
-#        initial_weight = ((xx**2 + yy**2 - 2) / 2)**2
-#        initial_weight = initial_weight.view(1, -1, 1)
-#        self.weight = nn.Parameter(initial_weight)
-#
-#    def forward(self, x):
-#        x = self.encoder._process_input(x)
-#        n, h, w = x.shape
-#
-#        x = x * self.weight.to(x.device)
-#
-#        batch_class_token = self.encoder.class_token.expand(n, -1, -1)
-#        x = torch.cat([batch_class_token, x], dim=1)
-#        x = self.encoder.encoder(x)
-#        x = x[:, 0]
-#        x = self.encoder.heads(x)
-#        return x
-
 class Encoder(nn.Module):
     def __init__(self, backbone="vit_b_16"):
         super().__init__()
@@ -200,22 +194,6 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         return self.encoder(x)
-#        x = self.encoder._process_input(x)
-#        n, h, w = x.shape
-#
-#        grid_size = int(h ** 0.5)
-#        coords = torch.linspace(-1, 1, steps=grid_size)
-#        yy, xx = torch.meshgrid(coords, coords, indexing='ij')
-#        weight = ((xx**2 + yy**2 - 2) / 2)**2
-#        weight = weight.view(1, -1, 1).to(x.device)
-#        x = x * weight
-#
-#        batch_class_token = self.encoder.class_token.expand(n, -1, -1)
-#        x = torch.cat([batch_class_token, x], dim=1)
-#        x = self.encoder.encoder(x)
-#        x = x[:, 0]
-#        x = self.encoder.heads(x)
-#        return x
 
 def reset_parameters(module):
     for m in module.modules():

@@ -54,7 +54,7 @@ class Preprocessing():
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape
 
         self.annotated_cell_ids = None
-        self.image_ids = None
+        self.filtered_image_ids = None
         self.cell_ids = None
         
         self.sc_annotation()
@@ -162,23 +162,34 @@ class Preprocessing():
         centroids_y = centroids_y.round().astype(int)
         half = int(self.crop_size // 2)
         coords = np.stack([centroids_x-half, centroids_x+half, centroids_y-half, centroids_y+half], axis=1)
-        print("Making images to torch tensors ... ", end='')
+        print("Filtering non rectangles ... ", end='')
         ids_images = {
             cell_id: torch.from_numpy(self.he_image_array[:, y_min:y_max, x_min:x_max])
             for cell_id, (x_min, x_max, y_min, y_max) in zip(bounds_ids, coords)
             if 0 <= x_min < x_max < self.image_width and 0 <= y_min < y_max < self.image_height
         }
-        self.image_ids = ids_images.keys()
-        print(len(self.image_ids))
+        print(len(ids_images))
+
+        print("Filtering color outliers by IQR ... ", end='')
+        image_ids = list(ids_images.keys())
+        images = torch.stack([ids_images[cell_id] for cell_id in image_ids])
+        images_mean = images.float().mean(dim=(2, 3))
+        qs = torch.stack([images_mean[:, 1].quantile(q) for q in [0.25, 0.75]]) #for green
+        iqr = qs[1] - qs[0]
+        upper = qs[1] + 1.5 * iqr
+        mask = images_mean[:,1] < upper
+        keep_ids = mask.nonzero(as_tuple=True)[0]
+        self.filtered_image_ids = [image_ids[i] for i in keep_ids.tolist()]
+        filtered_images = images[keep_ids]
+        filtered_ids_images = dict(zip(self.filtered_image_ids, filtered_images))
+        print(len(self.filtered_image_ids))
+
+        print("Save the image tensor and their ids ...")
         os.makedirs(self.processing_directory + f'images/', exist_ok=True)
         images_file = self.processing_directory + f"images/images_{self.upper_string}.pt"
         ids_file = self.processing_directory + f"images/image_ids_{self.upper_string}.json"
-        print("Stacking the torch tensors ... ")
-        images = torch.stack(list(ids_images.values()))
-        print(images.shape)
-        print("Save the tensor ...")
-        torch.save(images, images_file)
-        json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(ids_file, "w"))
+        torch.save(filtered_images, images_file)
+        json.dump({cell_id: i for i, cell_id in enumerate(self.filtered_image_ids)}, open(ids_file, "w"))
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
@@ -193,7 +204,7 @@ class Preprocessing():
         print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
         self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_expression']
 
-        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
+        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.filtered_image_ids)))
         print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
         self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
         self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
