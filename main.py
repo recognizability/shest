@@ -3,6 +3,7 @@ import argparse
 from config import seed, set_seed, Config
 from preprocess import Preprocessing
 from model import Modeling
+from benchmark_eval import evaluate_and_save_benchmark # for model benchmark
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -35,3 +36,11 @@ if __name__ == "__main__":
     if not 'subtype' in args.cell_type:
         modeling.draw_heatmap()
         modeling.draw_umaps_embedding()
+
+# Model benchmark
+y_true = modeling.labels
+y_pred = modeling.predictions
+class_names = list(config.classes)
+save_path = os.path.join(args.directory, f"results/benchmark_{config.stem_file}.csv")
+
+evaluate_and_save_benchmark(y_true, y_pred, class_names, save_path)
