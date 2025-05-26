@@ -164,7 +164,7 @@ class Dataset():
             ax[i][j].set_title(f"n={counts.sum(axis=1).values[0]}")
             for container in ax[i][j].containers:
                 ax[i][j].bar_label(container)
-            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None)
+            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None, size=1)
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
         plt.close()
@@ -210,13 +210,13 @@ def reset_parameters(module):
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 4096
+        hidden = 2048
         dropout = 0.3
         self.norm0 = nn.BatchNorm1d(in_features)
-        self.fc1 = nn.Linear(in_features, hidden)
-        self.norm1 = nn.BatchNorm1d(hidden)
+        self.fc1 = nn.Linear(in_features, hidden//2)
+        self.norm1 = nn.BatchNorm1d(hidden//2)
         self.dropout1 = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden, hidden)
+        self.fc2 = nn.Linear(hidden//2, hidden)
         self.norm2 = nn.BatchNorm1d(hidden)
         self.dropout2 = nn.Dropout(dropout)
         self.fc_mean = nn.Linear(hidden, out_features)
@@ -245,10 +245,10 @@ class Classifier(nn.Module):
         self.fc1 = nn.Linear(in_features, hidden)
         self.norm1 = nn.LayerNorm(hidden)
         self.dropout1 = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden, hidden)
-        self.norm2 = nn.LayerNorm(hidden)
+        self.fc2 = nn.Linear(hidden, hidden//2)
+        self.norm2 = nn.LayerNorm(hidden//2)
         self.dropout2 = nn.Dropout(dropout)
-        self.fc3 = nn.Linear(hidden, out_features)
+        self.fc3 = nn.Linear(hidden//2, out_features)
 
         reset_parameters(self)
 
@@ -289,7 +289,7 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
         nb = NegativeBinomial(total_count=total_count, logits=logits)
         
         log_zero_prob = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
-        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb.log_prob(target.float()) #if target > 0
+        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb.log_prob(target) #if target > 0
         zero_mask = (target < self.eps).float()
         loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
         return loss.mean()

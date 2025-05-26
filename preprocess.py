@@ -54,7 +54,7 @@ class Preprocessing():
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape
 
         self.annotated_cell_ids = None
-        self.filtered_image_ids = None
+        self.image_ids = None
         self.cell_ids = None
         
         self.sc_annotation()
@@ -64,13 +64,10 @@ class Preprocessing():
     def _prepare_sdata(self, path):
         path_zarr = path + "data.zarr" 
         if not os.path.exists(path_zarr):
-            sdata = xenium(
-                path=path,
-                n_jobs=n_cores,
-            )
+            sdata = xenium(path=path, n_jobs=n_cores)
             print("Saving zarr ...")
             sdata.write(path_zarr) 
-            print('Done.')
+            print('done.')
         else:
             print("Loading the zarr ...", end=' ')
             sdata = sd.SpatialData.read(path_zarr)
@@ -98,7 +95,7 @@ class Preprocessing():
                 self.adata,
                 ref,
                 annotation_key=cell_subtype,
-                assume_valid_counts=True,
+                assume_filtered_counts=True,
                 remove_constant_genes=False,
             ).T.idxmax()
             self.adata.obs[cell_subtype].to_csv(sc_annotation_csv)
@@ -138,10 +135,10 @@ class Preprocessing():
         bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
         bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
         bounds = bounds.merge(self.adata.obs['cell_type_expression'], how='left', left_index=True, right_index=True)
-        bounds_melted = bounds.melt(id_vars='cell_type_expression', value_vars=['width', 'height'], var_name='Length', value_name='Length_(μm)')
+        bounds_melted = bounds.melt(id_vars='cell_type_expression', value_vars=['width', 'height'], var_name='Side', value_name='Length_(μm)')
 
         fig = plt.figure(figsize=(4, 4))
-        sns.violinplot(bounds_melted, x='Length_(μm)', y='cell_type_expression', hue='Length', split=True, inner='quart', order=list(self.cell_types.keys()))
+        sns.violinplot(bounds_melted, y='cell_type_expression', x='Length_(μm)', hue='Side', split=True, inner='quart', order=list(self.cell_types.keys()))
         plt.axvline(x=self.upper, linestyle='--', color='gray')
         plt.axvline(x=self.lower, linestyle='--', color='gray')
         fig.tight_layout()
@@ -154,7 +151,7 @@ class Preprocessing():
             (self.lower <= bounds['height']) & 
             (bounds['height'] < self.upper)
         ].index
-        print(f"{len(bounds_ids)} cells are filtered by their area.")
+        print(f"{len(bounds_ids)} cells are valid by their area.")
 
         centroids = self.cell_boundaries.loc[bounds_ids, "geometry"].centroid
         centroids_x, centroids_y = self._inverse_affine_transform(centroids.x/self.pixel_size, centroids.y/self.pixel_size)
@@ -168,28 +165,14 @@ class Preprocessing():
             for cell_id, (x_min, x_max, y_min, y_max) in zip(bounds_ids, coords)
             if 0 <= x_min < x_max < self.image_width and 0 <= y_min < y_max < self.image_height
         }
-        print(len(ids_images))
-
-        print("Filtering color outliers by IQR ... ", end='')
-        image_ids = list(ids_images.keys())
-        images = torch.stack([ids_images[cell_id] for cell_id in image_ids])
-        images_mean = images.float().mean(dim=(2, 3))
-        qs = torch.stack([images_mean[:, 1].quantile(q) for q in [0.25, 0.75]]) #for green
-        iqr = qs[1] - qs[0]
-        upper = qs[1] + 1.5 * iqr
-        mask = images_mean[:,1] < upper
-        keep_ids = mask.nonzero(as_tuple=True)[0]
-        self.filtered_image_ids = [image_ids[i] for i in keep_ids.tolist()]
-        filtered_images = images[keep_ids]
-        filtered_ids_images = dict(zip(self.filtered_image_ids, filtered_images))
-        print(len(self.filtered_image_ids))
+        self.image_ids = list(ids_images.keys())
+        print(len(self.image_ids))
 
         print("Save the image tensor and their ids ...")
         os.makedirs(self.processing_directory + f'images/', exist_ok=True)
-        images_file = self.processing_directory + f"images/images_{self.upper_string}.pt"
-        ids_file = self.processing_directory + f"images/image_ids_{self.upper_string}.json"
-        torch.save(filtered_images, images_file)
-        json.dump({cell_id: i for i, cell_id in enumerate(self.filtered_image_ids)}, open(ids_file, "w"))
+        images = torch.stack([ids_images[cell_id] for cell_id in self.image_ids])
+        torch.save(images, self.processing_directory + f"images/images_{self.upper_string}.pt")
+        json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(self.processing_directory + f"images/image_ids_{self.upper_string}.json", "w"))
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
@@ -204,7 +187,7 @@ class Preprocessing():
         print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
         self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_expression']
 
-        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.filtered_image_ids)))
+        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
         print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
         self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
         self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)

@@ -26,7 +26,7 @@ def set_seed(seed=seed):
     torch.use_deterministic_algorithms(True)
 
 
-cell_types = {
+cell_types = { #cell subtypes from CZ CELLxGENE Discover
     'lung':{
         'Tumor_cell_LUAD': [
             'Tumor cells LUAD',
@@ -40,6 +40,12 @@ cell_types = {
         "Macrophage": [
             "Macrophage",
         ],
+        'Endothelial_cell': [
+            'Endothelial cell arterial',
+            'Endothelial cell capillary',
+            'Endothelial cell lymphatic',
+            'Endothelial cell venous',
+        ],
         'Stromal_cell': [
             'Fibroblast adventitial',
             'Fibroblast alveolar',
@@ -48,17 +54,13 @@ cell_types = {
             'Mesothelial',
             'Pericyte',
         ],
-        'Endothelial_cell': [
-            'Endothelial cell arterial',
-            'Endothelial cell capillary',
-            'Endothelial cell lymphatic',
-            'Endothelial cell venous',
-        ],
         'Plasma_cell': [
              'Plasma cell',
         ],
-        'Lymphocyte': [
+        'B_cell': [
              'B cell',
+        ],
+        'T_cell': [
              'T cell regulatory',
              'T cell CD4',
              'T cell CD8 activated',
@@ -66,7 +68,37 @@ cell_types = {
              'T cell CD8 naive',
              'T cell CD8 terminally exhausted',
              'T cell NK-like',
-             'NK cell',
+        ],
+    },
+    'breast': {
+        "Tumor_cell": [
+            "luminal epithelial cell of mammary gland", 
+            "mammary gland epithelial cell",
+        ], 
+        "Macrophage": [
+            "macrophage",
+        ], 
+        "Endothelial_cell": [
+            "endothelial cell", 
+            "endothelial cell of lymphatic vessel"
+        ], 
+        'Stromal_cell': [
+            "fibroblast of breast",
+            "pericyte",
+        ], 
+        'Plasma_cell': [
+            "plasmablast",
+        ], 
+        'B_cell': [
+            "memory B cell", 
+            "naive B cell", 
+        ], 
+        'T_cell': [
+            "T cell",
+            "CD4-positive, alpha-beta T cell",
+            "CD8-positive, alpha-beta T cell",
+            "mature NK T cell",
+            "natural killer cell",
         ],
     },
 }
@@ -79,7 +111,8 @@ class Config:
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-        palette = 'blend:red,orange,yellow,green,blue'
+#        palette = 'blend:red,orange,yellow,green,blue,navy'
+        palette = 'gist_ncar_r'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
             sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()
@@ -96,5 +129,5 @@ class Config:
             parameters = list(self.cell_types.keys())
         self.label_encoder.fit(parameters)
         self.label_encoder.classes_ = np.array(parameters)
-        self.classes = self.label_encoder.classes_
+        self.classes = self.label_encoder.classes_ #for classification
         print('The classes are:', self.classes)
