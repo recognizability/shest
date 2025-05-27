@@ -1,7 +1,7 @@
 import argparse
 
 from config import seed, set_seed, Config
-from preprocess import Preprocessing
+#from preprocess import Preprocessing
 from model import Modeling
 
 if __name__ == "__main__":
@@ -14,7 +14,6 @@ if __name__ == "__main__":
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
     parser.add_argument("--source", type=str, default="10X", help="Data source")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
-    parser.add_argument("--upper", type=int, default=18, help="Upper limit of the one side length of the bounding rectangle of a cell within an H&E image (in micrometers)")
     parser.add_argument("--filter", action="store_true", help="Force filtration by the cell area")
     parser.add_argument("--cell_type", type=str, default="cell_type", help="Cell type to consider")
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
@@ -26,8 +25,6 @@ if __name__ == "__main__":
     print(args)
 
     config = Config(args)
-
-    Preprocessing(args, config)
 
     modeling = Modeling(args, config)
     modeling.evaluate()

@@ -34,6 +34,7 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 from config import n_cores, seed, set_seed, generator, device
+from preprocess import Preprocessing
 
 sc.settings.n_jobs = n_cores
 in_features = 1000 #output features of ViT or SwinTransformer
@@ -51,8 +52,6 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.upper = args.upper
-        self.upper_string = f"upper{args.upper}"
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -61,14 +60,16 @@ class Dataset():
         self.batch_size = args.batch_size
         self.stem_file = config.stem_file
 
+        data = Preprocessing(args, config)
+
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        self.images = torch.load(processing_directory + f'images/images_{self.upper_string}.pt')
-        self.image_ids = json.load(open(processing_directory + f"images/image_ids_{self.upper_string}.json"))
+        self.image_ids = data.image_ids
+        self.window_images = data.window_images
+        self.nucleus_images = data.nucleus_images
         print(len(self.image_ids), "images of the cells are prepared.")
 
         print('Expression profile and their cell types loading ... ', end='')
-        adata_file = os.path.join(processing_directory, f'annotation/adata.h5ad')
-        self.adata_raw = sc.read_h5ad(adata_file)
+        self.adata_raw = data.adata
         print(self.adata_raw.shape)
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
         print(len(type_ids), "of annotated cells are loaded.")
@@ -100,19 +101,19 @@ class Dataset():
 
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
-        image_raw = self.images[self.image_ids[cell_id]]
+        window_image = torch.from_numpy(self.window_images[cell_id])
+        nucleus_image = torch.from_numpy(self.nucleus_images[cell_id])
         length = 224
         half = length // 2
-        weight = self._weight(half).to(image_raw.device).unsqueeze(0)
-        image = torch.zeros(3, length, length, dtype=torch.uint8, device=image_raw.device)
-        tile =  image_raw.shape[1]// 3
 
-        image_top_left = self._resize(image_raw, half)
+        weight = self._weight(half).to(window_image.device).unsqueeze(0)
+
+        image_top_left = self._resize(window_image, half)
         image_top_right = image_top_left * weight
-        image_bottom_left = self._resize(image_raw[:, tile:2*tile, tile:2*tile], half)
+        image_bottom_left = self._resize(nucleus_image, half)
         image_bottom_right = image_bottom_left * weight
 
-        image = torch.zeros(3, length, length, dtype=torch.uint8, device=image_raw.device)
+        image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
         image[:, :half, :half] = image_top_left
         image[:, :half, half:] = image_top_right
         image[:, half:, :half] = image_bottom_left
@@ -166,7 +167,7 @@ class Dataset():
                 ax[i][j].bar_label(container)
             sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None, size=1)
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
 
     def loader(self, split=0.8):
@@ -303,9 +304,6 @@ class Modeling():
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.palette = self.palette_subtype if self.cell_type == 'Cell_subtype_ST' else self.palette_type
-        self.upper = args.upper
-        self.upper_string = f"upper{args.upper}"
-        self.suffix = f"{self.upper_string}_{self.cell_type}"
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
@@ -336,7 +334,7 @@ class Modeling():
         self.load()
 
     def load(self):
-        model_file = self.directory + f"models/model_{self.stem_file}_{self.suffix}.pth"
+        model_file = self.directory + f"models/model_{self.stem_file}_{self.cell_type}.pth"
         if not os.path.isfile(model_file) or self.train:
             optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
@@ -507,7 +505,7 @@ class Modeling():
         plt.legend(markers, self.palette.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
         
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.suffix}.png", bbox_inches="tight")
+        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
 
     def draw_heatmap(self):
@@ -563,7 +561,7 @@ class Modeling():
         ax[1].set_title("Reconstructed")
 
         plt.tight_layout()
-        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.suffix}.png")
+        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.cell_type}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
@@ -586,7 +584,7 @@ class Modeling():
         ax[1].set_ylabel('Label')
 
         fig.tight_layout()
-        plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.suffix}.png", bbox_inches="tight")
+        plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
 
     def infer(self, inference_loader):

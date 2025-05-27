@@ -1,6 +1,7 @@
 import os
 import argparse
 import json
+import pickle
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -36,15 +37,13 @@ class Preprocessing():
         self.subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
 
         self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
-        self.lower = 4 #micrometers
-        self.upper = args.upper #micrometers
-        self.upper_string = f"upper{args.upper}"
-        self.crop_size = int(self.upper // self.pixel_size) #pixels
+        self.lower = 3 #micrometers
+        self.upper = 18 #micrometers
         self.filter = args.filter
 
         self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
-        self.cell_boundaries = self.sdata.shapes["cell_boundaries"]
+        self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
         self.adata = self.sdata.tables['table']
 
         self.processing_directory = self.directory + 'dataset/' + config.stem_directory
@@ -55,6 +54,7 @@ class Preprocessing():
 
         self.annotated_cell_ids = None
         self.image_ids = None
+        self.images = None
         self.cell_ids = None
         
         self.sc_annotation()
@@ -131,48 +131,57 @@ class Preprocessing():
             return x_transformed, y_transformed
 
     def cell_area_filter(self):
-        bounds = self.cell_boundaries.bounds
-        bounds['width'] = bounds.apply(lambda row: row['maxx'] - row['minx'], axis=1)
-        bounds['height'] = bounds.apply(lambda row: row['maxy'] - row['miny'], axis=1)
-        bounds = bounds.merge(self.adata.obs['cell_type_expression'], how='left', left_index=True, right_index=True)
+        bounds = self.nucleus_boundaries.bounds
+        bounds['width'] = bounds['maxx'] - bounds['minx']
+        bounds['height'] = bounds['maxy'] - bounds['miny']
+        bounds['cell_type_expression'] = self.adata.obs.loc[bounds.index, 'cell_type_expression']
         bounds_melted = bounds.melt(id_vars='cell_type_expression', value_vars=['width', 'height'], var_name='Side', value_name='Length_(μm)')
-
-        fig = plt.figure(figsize=(4, 4))
-        sns.violinplot(bounds_melted, y='cell_type_expression', x='Length_(μm)', hue='Side', split=True, inner='quart', order=list(self.cell_types.keys()))
-        plt.axvline(x=self.upper, linestyle='--', color='gray')
-        plt.axvline(x=self.lower, linestyle='--', color='gray')
+        fig, ax = plt.subplots(figsize=(4, 4))
+        sns.violinplot(data=bounds_melted, y='cell_type_expression', x='Length_(μm)', hue='Side', split=True, inner='quart', order=list(self.cell_types.keys()), ax=ax)
+        ax.axvline(self.upper, ls='--', c='gray')
+        ax.axvline(self.lower, ls='--', c='gray')
         fig.tight_layout()
-        fig.savefig(self.directory + f"results/violinplot_{self.stem_file}_{self.upper_string}.png", bbox_inches="tight")
+        fig.savefig(f"{self.directory}results/violinplot_{self.stem_file}.png", bbox_inches="tight")
         plt.close(fig)
-        
-        bounds_ids = bounds[
-            (self.lower <= bounds['width']) & 
-            (bounds['width'] < self.upper) &
-            (self.lower <= bounds['height']) & 
-            (bounds['height'] < self.upper)
-        ].index
-        print(f"{len(bounds_ids)} cells are valid by their area.")
 
-        centroids = self.cell_boundaries.loc[bounds_ids, "geometry"].centroid
-        centroids_x, centroids_y = self._inverse_affine_transform(centroids.x/self.pixel_size, centroids.y/self.pixel_size)
-        centroids_x = centroids_x.round().astype(int)
-        centroids_y = centroids_y.round().astype(int)
-        half = int(self.crop_size // 2)
-        coords = np.stack([centroids_x-half, centroids_x+half, centroids_y-half, centroids_y+half], axis=1)
-        print("Filtering non rectangles ... ", end='')
-        ids_images = {
-            cell_id: torch.from_numpy(self.he_image_array[:, y_min:y_max, x_min:x_max])
-            for cell_id, (x_min, x_max, y_min, y_max) in zip(bounds_ids, coords)
-            if 0 <= x_min < x_max < self.image_width and 0 <= y_min < y_max < self.image_height
-        }
-        self.image_ids = list(ids_images.keys())
+        centroids = self.nucleus_boundaries.centroid
+        centroids_x, centroids_y = self._inverse_affine_transform(centroids.x / self.pixel_size, centroids.y / self.pixel_size)
+        bounds['centroid_x'] = np.round(centroids_x).astype(int)
+        bounds['centroid_y'] = np.round(centroids_y).astype(int)
+        bounds = bounds.loc[
+            (self.lower <= bounds['width']) & (bounds['width'] < self.upper) &
+            (self.lower <= bounds['height']) & (bounds['height'] < self.upper)
+        ]
+
+        print("Filtering rectangular cell regions ... ", end='')
+        self.window_images = {}
+        self.nucleus_images = {}
+        for bound in bounds.itertuples():
+            cell_id = bound.Index
+            window = int(np.ceil(self.upper / self.pixel_size))
+            x_start = bound.centroid_x - window//2
+            y_start = bound.centroid_y - window//2
+            x_end = bound.centroid_x + window//2
+            y_end = bound.centroid_y + window//2
+            if x_start < 0 or y_start < 0 or self.image_width <= x_end + 1 or self.image_height <= y_end + 1:
+                continue
+            self.window_images[cell_id] = self.he_image_array[:, y_start : y_end + 1, x_start : x_end + 1]
+            crop_size = int(np.ceil(max(bound.width, bound.height) / self.pixel_size))
+            x_start = bound.centroid_x - crop_size//2
+            y_start = bound.centroid_y - crop_size//2
+            x_end = bound.centroid_x + crop_size//2
+            y_end = bound.centroid_y + crop_size//2
+            self.nucleus_images[cell_id] = self.he_image_array[:, y_start : y_end + 1, x_start : x_end + 1]
+
+        self.image_ids = list(self.window_images.keys())
         print(len(self.image_ids))
 
-        print("Save the image tensor and their ids ...")
-        os.makedirs(self.processing_directory + f'images/', exist_ok=True)
-        images = torch.stack([ids_images[cell_id] for cell_id in self.image_ids])
-        torch.save(images, self.processing_directory + f"images/images_{self.upper_string}.pt")
-        json.dump({cell_id: i for i, cell_id in enumerate(self.image_ids)}, open(self.processing_directory + f"images/image_ids_{self.upper_string}.json", "w"))
+        print("Save the images ...")
+        images_directory = os.path.join(self.processing_directory, 'images/')
+        os.makedirs(images_directory, exist_ok=True)
+        for cell_id in tqdm(self.image_ids):
+            np.save(os.path.join(images_directory, f"{cell_id}_window.npy"), self.window_images[cell_id])
+            np.save(os.path.join(images_directory, f"{cell_id}_nucleus.npy"), self.nucleus_images[cell_id])
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')

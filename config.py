@@ -111,7 +111,6 @@ class Config:
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-#        palette = 'blend:red,orange,yellow,green,blue,navy'
         palette = 'gist_ncar_r'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
