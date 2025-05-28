@@ -63,9 +63,8 @@ class Dataset():
         data = Preprocessing(args, config)
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
+        self.images = data.images
         self.image_ids = data.image_ids
-        self.window_images = data.window_images
-        self.nucleus_images = data.nucleus_images
         print(len(self.image_ids), "images of the cells are prepared.")
 
         print('Expression profile and their cell types loading ... ', end='')
@@ -101,8 +100,12 @@ class Dataset():
 
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
-        window_image = torch.from_numpy(self.window_images[cell_id])
-        nucleus_image = torch.from_numpy(self.nucleus_images[cell_id])
+        image = self.images[cell_id]
+        window_image = torch.from_numpy(image['window_image'])
+        center = window_image.shape[1] // 2
+        nucleus = image['nucleus']
+        nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
+
         length = 224
         half = length // 2
 

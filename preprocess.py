@@ -154,34 +154,31 @@ class Preprocessing():
         ]
 
         print("Filtering rectangular cell regions ... ", end='')
-        self.window_images = {}
-        self.nucleus_images = {}
+        self.images = {}
+        window = int(np.ceil(self.upper / self.pixel_size))
         for bound in bounds.itertuples():
             cell_id = bound.Index
-            window = int(np.ceil(self.upper / self.pixel_size))
-            x_start = bound.centroid_x - window//2
-            y_start = bound.centroid_y - window//2
-            x_end = bound.centroid_x + window//2
-            y_end = bound.centroid_y + window//2
-            if x_start < 0 or y_start < 0 or self.image_width <= x_end + 1 or self.image_height <= y_end + 1:
+            cx = bound.centroid_x
+            cy = bound.centroid_y
+            x_start = cx - window//2
+            y_start = cy - window//2
+            x_end = cx + window//2 + 1
+            y_end = cy + window//2 + 1
+            if x_start < 0 or y_start < 0 or self.image_width <= x_end or self.image_height <= y_end:
                 continue
-            self.window_images[cell_id] = self.he_image_array[:, y_start : y_end + 1, x_start : x_end + 1]
-            crop_size = int(np.ceil(max(bound.width, bound.height) / self.pixel_size))
-            x_start = bound.centroid_x - crop_size//2
-            y_start = bound.centroid_y - crop_size//2
-            x_end = bound.centroid_x + crop_size//2
-            y_end = bound.centroid_y + crop_size//2
-            self.nucleus_images[cell_id] = self.he_image_array[:, y_start : y_end + 1, x_start : x_end + 1]
-
-        self.image_ids = list(self.window_images.keys())
+            self.images[cell_id] = {
+                'window_image': self.he_image_array[:, y_start:y_end, x_start:x_end],
+                'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)),
+            }
+        self.image_ids = list(self.images.keys())
         print(len(self.image_ids))
 
-        print("Save the images ...")
-        images_directory = os.path.join(self.processing_directory, 'images/')
-        os.makedirs(images_directory, exist_ok=True)
-        for cell_id in tqdm(self.image_ids):
-            np.save(os.path.join(images_directory, f"{cell_id}_window.npy"), self.window_images[cell_id])
-            np.save(os.path.join(images_directory, f"{cell_id}_nucleus.npy"), self.nucleus_images[cell_id])
+#        print("Save the images ...")
+#        images_directory = os.path.join(self.processing_directory, 'images/')
+#        np.savez_compressed(
+#            os.path.join(images_directory, f"images.npz"),
+#            **self.images,
+#        )
 
     def annotation(self):
         he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
