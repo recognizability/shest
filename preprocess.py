@@ -33,6 +33,7 @@ class Preprocessing():
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
         self.cell_types = config.cell_types
+        self.cell_subtype = config.cell_subtype
         self.cell_subtypes = config.cell_subtypes
         self.subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
 
@@ -45,6 +46,7 @@ class Preprocessing():
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
         self.adata = self.sdata.tables['table']
+        self.adata.obs.index = self.adata.obs['cell_id']
 
         self.processing_directory = self.directory + 'dataset/' + config.stem_directory
         os.makedirs(self.processing_directory, exist_ok=True)
@@ -78,28 +80,31 @@ class Preprocessing():
         if 'lung' in self.sample.lower():
             print("Loading LuCA single cell reference ... ", end='')
             ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
-            ref.index = ref.var.feature_name
-            ref.var.index = ref.var.feature_name
             ref = ref[ref.obs['platform']!='Smart-seq2'].copy()
-            print(ref.shape)
+        if 'breast' in self.sample.lower():
+            print("Loading breast cancer single cell reference ... ", end='')
+            ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/966b60ee-b416-44bd-981c-817bfc476646.h5ad')
+        ref.index = ref.var.feature_name
+        ref.var.index = ref.var.feature_name
+        print(ref.shape)
         return ref
 
-    def sc_annotation(self, cell_subtype='cell_type_tumor'):
+    def sc_annotation(self):
         os.makedirs(self.processing_directory + f'annotation/', exist_ok=True)
-        sc_annotation_csv = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.csv'
-        sc_annotation_h5ad = self.processing_directory + f'annotation/sc_annotation_{cell_subtype}.h5ad'
+        sc_annotation_csv = self.processing_directory + f'annotation/sc_annotation_{self.cell_subtype}.csv'
+        sc_annotation_h5ad = self.processing_directory + f'annotation/sc_annotation_{self.cell_subtype}.h5ad'
         if not (os.path.exists(sc_annotation_csv) and os.path.exists(sc_annotation_h5ad)) or self.sc_annotate:
             ref = self._single_cell_reference()
             print('Annotating types of the cells ... ')
-            self.adata.obs[cell_subtype] = tc.tl.annotate(
+            self.adata.obs[self.cell_subtype] = tc.tl.annotate(
                 self.adata,
                 ref,
-                annotation_key=cell_subtype,
-                assume_filtered_counts=True,
+                annotation_key=self.cell_subtype,
+                assume_valid_counts=True,
                 remove_constant_genes=False,
             ).T.idxmax()
-            self.adata.obs[cell_subtype].to_csv(sc_annotation_csv)
-            print(len(self.adata.obs[cell_subtype].unique()), 'subtypes are annotated.')
+            self.adata.obs[self.cell_subtype].to_csv(sc_annotation_csv)
+            print(len(self.adata.obs[self.cell_subtype].unique()), 'subtypes are annotated.')
 
             print('Setting neighbors for each cell ...')
             sc.pp.neighbors(self.adata, random_state=seed)
@@ -111,10 +116,10 @@ class Preprocessing():
             self.adata = sc.read_h5ad(sc_annotation_h5ad)
 
         self.adata.obs.index = self.adata.obs['cell_id']
-        inclusion = self.adata.obs[cell_subtype].isin(self.cell_subtypes)
-        self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, cell_subtype]
+        inclusion = self.adata.obs[self.cell_subtype].isin(self.cell_subtypes)
+        self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, self.cell_subtype]
         self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes)
-        self.adata.obs['cell_type_expression'] = self.adata.obs[cell_subtype].map(self.subtype_to_type)
+        self.adata.obs['cell_type_expression'] = self.adata.obs[self.cell_subtype].map(self.subtype_to_type)
 
     def _inverse_affine_transform(self, x_pixel, y_pixel):
         x_pixel = np.atleast_1d(x_pixel)
@@ -173,15 +178,18 @@ class Preprocessing():
         self.image_ids = list(self.images.keys())
         print(len(self.image_ids))
 
-#        print("Save the images ...")
-#        images_directory = os.path.join(self.processing_directory, 'images/')
-#        np.savez_compressed(
-#            os.path.join(images_directory, f"images.npz"),
-#            **self.images,
-#        )
+        print("Save the images ...")
+        images_directory = os.path.join(self.processing_directory, 'images/')
+        os.makedirs(images_directory, exist_ok=True)
+        images_file = images_directory + f"images.npz"
+        if not os.path.exists(images_file):
+            np.savez_compressed(
+                os.path.join(image_file),
+                **self.images,
+            )
 
     def annotation(self):
-        he_annotation = pd.read_csv(self.processing_directory + f"annotation/merged_output.csv", index_col='cell_id')
+        he_annotation = pd.read_csv(self.processing_directory + f"annotation/he_annotation.csv", index_col='cell_id')
         he_annotation['cell_type_morphology'] = he_annotation['group'].astype(str)
         self.adata.obs = self.adata.obs.merge(he_annotation['cell_type_morphology'], how='left', left_index=True, right_index=True)
         print(f"{len(self.adata.obs['cell_type_morphology'].dropna())} cells are annotated by thier morphologies.")

@@ -55,19 +55,18 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Pericyte',
         ],
         'Plasma_cell': [
-             'Plasma cell',
+            'Plasma cell',
         ],
-        'B_cell': [
-             'B cell',
-        ],
-        'T_cell': [
-             'T cell regulatory',
-             'T cell CD4',
-             'T cell CD8 activated',
-             'T cell CD8 effector memory',
-             'T cell CD8 naive',
-             'T cell CD8 terminally exhausted',
-             'T cell NK-like',
+        'Lymphocyte': [
+            'B cell',
+            'T cell regulatory',
+            'T cell CD4',
+            'T cell CD8 activated',
+            'T cell CD8 effector memory',
+            'T cell CD8 naive',
+            'T cell CD8 terminally exhausted',
+            'T cell NK-like',
+            'NK cell', # not B or T
         ],
     },
     'breast': {
@@ -86,14 +85,12 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             "fibroblast of breast",
             "pericyte",
         ], 
-        'Plasma_cell': [
-            "plasmablast",
-        ], 
-        'B_cell': [
+#        'Plasma_cell': [
+#            "plasmablast",
+#        ], 
+        'Lymphocyte': [
             "memory B cell", 
             "naive B cell", 
-        ], 
-        'T_cell': [
             "T cell",
             "CD4-positive, alpha-beta T cell",
             "CD8-positive, alpha-beta T cell",
@@ -103,15 +100,22 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
     },
 }
 
+cell_subtype = {
+    'lung':'cell_type_tumor',
+    'breast':'cell_type',
+}
+
 class Config:
     def __init__(self, args):
         self.stem_directory = f"{args.platform}/{args.source}/{args.sample}/"
         self.stem_file = f"{args.platform}_{args.source}_{args.sample}"
 
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
+        self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ in args.sample.lower()), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-        palette = 'gist_ncar_r'
+#        palette = 'gist_ncar_r'
+        palette = 'nipy_spectral_r'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
             sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()

@@ -81,11 +81,11 @@ class Dataset():
         self.label_encoder = config.label_encoder
         self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
         self.genes = self.adata.var_names.tolist()
-        self.classes = config.classes
 
         cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
         self.expressions = torch.from_numpy(self.adata.X[cell_indices].toarray()).float()
         self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
+        self.classes = config.classes
 
     def __len__(self):
         return len(self.cell_ids)
