@@ -5,6 +5,7 @@ from sklearn.preprocessing import LabelEncoder
 import torch
 import multiprocessing as mp
 import seaborn as sns
+from pprint import pprint
 
 n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
@@ -51,7 +52,7 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Fibroblast alveolar',
             'Fibroblast peribronchial',
             'Smooth muscle cell',
-            'Mesothelial',
+#            'Mesothelial',
             'Pericyte',
         ],
         'Plasma_cell': [
@@ -70,7 +71,7 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
         ],
     },
     'breast': {
-        "Tumor_cell": [
+        "Tumor_cell_BRCA": [
             "luminal epithelial cell of mammary gland", 
             "mammary gland epithelial cell",
         ], 
@@ -85,9 +86,9 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             "fibroblast of breast",
             "pericyte",
         ], 
-#        'Plasma_cell': [
-#            "plasmablast",
-#        ], 
+        'Plasma_cell': [
+#            "plasmablast", #not the plasma cell
+        ], 
         'Lymphocyte': [
             "memory B cell", 
             "naive B cell", 
@@ -110,11 +111,15 @@ class Config:
         self.stem_directory = f"{args.platform}/{args.source}/{args.sample}/"
         self.stem_file = f"{args.platform}_{args.source}_{args.sample}"
 
-        self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ in args.sample.lower()), {}) #for the organ
-        self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ in args.sample.lower()), {}) #for the organ
+        if any(term in args.sample.lower() for term in ['lung', 'luad', 'nsclc']):
+            self.organ = 'lung'
+        elif any(term in args.sample.lower() for term in ['breast', 'brca']):
+            self.organ = 'breast'
+
+        self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ == self.organ), {}) #for the organ
+        self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-#        palette = 'gist_ncar_r'
         palette = 'nipy_spectral_r'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
@@ -134,3 +139,5 @@ class Config:
         self.label_encoder.classes_ = np.array(parameters)
         self.classes = self.label_encoder.classes_ #for classification
         print('The classes are:', self.classes)
+
+        pprint(self.__dict__)

@@ -32,6 +32,7 @@ class Preprocessing():
         self.stem_file = config.stem_file
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
+        self.organ = config.organ
         self.cell_types = config.cell_types
         self.cell_subtype = config.cell_subtype
         self.cell_subtypes = config.cell_subtypes
@@ -45,7 +46,9 @@ class Preprocessing():
         self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
-        self.adata = self.sdata.tables['table']
+        adata_raw = self.sdata.tables['table']
+        gene_panel = pd.read_csv('/data0/Xenium_Prime/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name']
+        self.adata = adata_raw[:, adata_raw.var_names.isin(gene_panel)].copy()
         self.adata.obs.index = self.adata.obs['cell_id']
 
         self.processing_directory = self.directory + 'dataset/' + config.stem_directory
@@ -77,11 +80,11 @@ class Preprocessing():
         return sdata
 
     def _single_cell_reference(self):
-        if 'lung' in self.sample.lower():
+        if self.organ == 'lung':
             print("Loading LuCA single cell reference ... ", end='')
             ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/dd538ee7-f5e4-49e9-9f1e-2a1ea5246cf4.h5ad')
             ref = ref[ref.obs['platform']!='Smart-seq2'].copy()
-        if 'breast' in self.sample.lower():
+        if self.organ == 'breast':
             print("Loading breast cancer single cell reference ... ", end='')
             ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/966b60ee-b416-44bd-981c-817bfc476646.h5ad')
         ref.index = ref.var.feature_name

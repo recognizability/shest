@@ -411,7 +411,10 @@ class Modeling():
             print(f"Loading weights from {model_file} ...")
             self.model.load_state_dict(torch.load(model_file, map_location=device))
 
-    def evaluate(self):
+    def evaluate(self, test_loader=None):
+        if test_loader is None:
+            test_loader = self.test_loader
+
         self.model.eval()
 
         images = [] 
@@ -429,7 +432,7 @@ class Modeling():
 
         print(f"Evaluating the model ...")
         with torch.no_grad():
-            for cell_id, image, expression, label in tqdm(self.test_loader):
+            for cell_id, image, expression, label in tqdm(test_loader):
                 image = image.to(device, non_blocking=True)
                 expression = expression.to(device, non_blocking=True)
                 label = label.to(device, non_blocking=True)
@@ -453,8 +456,8 @@ class Modeling():
 
                 del image, expression, label, embedding, mean, overdispersion, probability, logit, reconstruction, prediction
                 
-        print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(self.test_loader):.5f}")
-        print(f"Test Loss of classification: {test_loss_classification / len(self.test_loader):.5f}")
+        print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(test_loader):.5f}")
+        print(f"Test Loss of classification: {test_loss_classification / len(test_loader):.5f}")
 
         self.images = torch.cat(images).numpy()
         self.expressions = torch.cat(expressions).numpy()
