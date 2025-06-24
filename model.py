@@ -164,7 +164,7 @@ class Dataset():
                palette = palette,
                ax=ax[i][j]
             )
-            ax[i][j].set_xlim(0, counts.max(axis=None)*1.2)
+            ax[i][j].set_xlim(0, counts.max(axis=None, skipna=True) * 1.2 if pd.notna(counts.max(axis=None)) else 1)
             ax[i][j].set_title(f"n={counts.sum(axis=1).values[0]}")
             for container in ax[i][j].containers:
                 ax[i][j].bar_label(container)
@@ -214,14 +214,14 @@ def reset_parameters(module):
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 2048
+        hidden = 4096
         dropout = 0.3
-        self.norm0 = nn.BatchNorm1d(in_features)
+        self.norm0 = nn.LayerNorm(in_features)
         self.fc1 = nn.Linear(in_features, hidden//2)
-        self.norm1 = nn.BatchNorm1d(hidden//2)
+        self.norm1 = nn.LayerNorm(hidden//2)
         self.dropout1 = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden//2, hidden)
-        self.norm2 = nn.BatchNorm1d(hidden)
+        self.norm2 = nn.LayerNorm(hidden)
         self.dropout2 = nn.Dropout(dropout)
         self.fc_mean = nn.Linear(hidden, out_features)
         self.fc_overdispersion = nn.Linear(hidden, out_features)
@@ -237,7 +237,7 @@ class Reconstructor(nn.Module):
         x = self.dropout2(x)
         mean = F.softplus(self.fc_mean(x))
         overdispersion = F.softplus(self.fc_overdispersion(x))
-        probability = F.relu(self.fc_probability(x))
+        probability = F.sigmoid(self.fc_probability(x))
         return mean, overdispersion, probability
 
 class Classifier(nn.Module):
@@ -279,22 +279,21 @@ class Model(nn.Module):
         return embedding, mean, overdispersion, probability, logits
 
 class ZeroInflatedNegativeBinomialLoss(nn.Module):
-    def __init__(self, eps=1e-8):
+    def __init__(self, stability=1e-256):
         super().__init__()
-        self.eps = eps
+        self.stability = stability
 
     def forward(self, mean, overdispersion, probability, target):
-        mean = mean + self.eps
-        overdispersion = overdispersion + self.eps
-        probability = torch.clamp(probability, self.eps, 1-self.eps)
+        mean = mean + self.stability
+        overdispersion = overdispersion + self.stability
 
         total_count = 1.0 / overdispersion
         logits = mean.log() - (total_count + mean).log()
         nb = NegativeBinomial(total_count=total_count, logits=logits)
         
         log_zero_prob = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
-        log_nonzero_prob = torch.log(1 - probability + self.eps) + nb.log_prob(target) #if target > 0
-        zero_mask = (target < self.eps).float()
+        log_nonzero_prob = torch.log(1 - probability + self.stability) + nb.log_prob(target) #if target > 0
+        zero_mask = (target < self.stability).float()
         loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
         return loss.mean()
 
@@ -306,7 +305,7 @@ class Modeling():
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
-        self.palette = self.palette_subtype if self.cell_type == 'Cell_subtype_ST' else self.palette_type
+        self.palette = self.palette_subtype if self.cell_type == 'cell_subtype_expression' else self.palette_type
 
         dataset = Dataset(args, config)
         dataset.draw_umaps_expression()
@@ -323,6 +322,7 @@ class Modeling():
         self.train = args.train
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
+        torch.compile(self.model)
 
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
         self.criterion_classification = nn.CrossEntropyLoss()
@@ -576,7 +576,7 @@ class Modeling():
         cm = confusion_matrix(self.labels, self.predictions, labels=self.classes)
         sns.heatmap(cm, annot=True, fmt='d', xticklabels=self.classes, yticklabels=self.classes, ax=ax[0])
         f1_weighted = f1_score(self.labels, self.predictions, average='weighted')
-        print(f'Weighted F1 score:, {f1_weighted:.5f}')
+        print(f'Weighted F1 score: {f1_weighted:.5f}')
         ax[0].set_title(f"{self.cell_type} (weighted f1: {f1_weighted:.4f})")
         ax[0].set_xlabel('Prediction')
         ax[0].set_ylabel('Label')

@@ -87,6 +87,10 @@ class Preprocessing():
         if self.organ == 'breast':
             print("Loading breast cancer single cell reference ... ", end='')
             ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/966b60ee-b416-44bd-981c-817bfc476646.h5ad')
+        if self.organ == 'skin':
+            print("Loading skin cancer single cell reference ... ", end='')
+            ref = sc.read_h5ad(self.raw_directory + 'cz_sc_reference/f6e35982-3bef-47fe-b14a-60d2e8965f20.h5ad')
+            ref = ref[ref.obs['disease'].str.contains('melanoma', case=False, na=False) & ref.obs['tissue'].str.contains('skin', case=False, na=False)].copy()
         ref.index = ref.var.feature_name
         ref.var.index = ref.var.feature_name
         print(ref.shape)
@@ -119,6 +123,7 @@ class Preprocessing():
             self.adata = sc.read_h5ad(sc_annotation_h5ad)
 
         self.adata.obs.index = self.adata.obs['cell_id']
+        self.adata.obs = self.adata.obs.drop(columns='cell_id')
         inclusion = self.adata.obs[self.cell_subtype].isin(self.cell_subtypes)
         self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, self.cell_subtype]
         self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes)
@@ -187,28 +192,30 @@ class Preprocessing():
         images_file = images_directory + f"images.npz"
         if not os.path.exists(images_file):
             np.savez_compressed(
-                os.path.join(image_file),
+                os.path.join(images_file),
                 **self.images,
             )
 
     def annotation(self):
-        he_annotation = pd.read_csv(self.processing_directory + f"annotation/he_annotation.csv", index_col='cell_id')
-        he_annotation['cell_type_morphology'] = he_annotation['group'].astype(str)
-        self.adata.obs = self.adata.obs.merge(he_annotation['cell_type_morphology'], how='left', left_index=True, right_index=True)
-        print(f"{len(self.adata.obs['cell_type_morphology'].dropna())} cells are annotated by thier morphologies.")
-        inclusion_morphology = self.adata.obs['cell_type_morphology'].notna()
+        he_annotation_file = self.processing_directory + f"annotation/he_annotation.csv"
+        if os.path.exists(he_annotation_file):
+            he_annotation = pd.read_csv(he_annotation_file, index_col='cell_id')
+            he_annotation['cell_type_morphology'] = he_annotation['group'].astype(str)
+            self.adata.obs = self.adata.obs.merge(he_annotation['cell_type_morphology'], how='left', left_index=True, right_index=True)
+            print(f"{len(self.adata.obs['cell_type_morphology'].dropna())} cells are annotated by thier morphologies.")
 
-        inclusion_annotation = self.adata.obs['cell_type_expression'].astype(str) == self.adata.obs['cell_type_morphology'].astype(str)
-        self.adata.obs.loc[inclusion_annotation, 'cell_type_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_type_expression']
-        self.annotated_cell_ids = self.adata.obs[self.adata.obs['cell_type_annotation'].notna()].index
-        print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
-        self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_expression']
+            inclusion_annotation = self.adata.obs['cell_type_expression'].astype(str) == self.adata.obs['cell_type_morphology'].astype(str)
+            self.adata.obs.loc[inclusion_annotation, 'cell_type_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_type_expression']
+            self.annotated_cell_ids = self.adata.obs[self.adata.obs['cell_type_annotation'].notna()].index
+            print(f'Only the {len(self.annotated_cell_ids)} cells are annotated by the morphology and the single cell reference')
+            self.adata.obs.loc[inclusion_annotation, 'cell_subtype_annotation'] = self.adata.obs.loc[inclusion_annotation, 'cell_subtype_expression']
 
-        self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
-        print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
-        self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
-        self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+            self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
+            print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
+            self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+            self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+            
+            self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
 
-        self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
         self.adata.raw = self.adata
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')

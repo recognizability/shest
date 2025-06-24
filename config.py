@@ -99,11 +99,31 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             "natural killer cell",
         ],
     },
+    'skin':{
+        'Tumor_cell_SKCM':[
+            'malignant cell',
+        ],
+        "Macrophage": [
+        ], 
+        'Endothelial_cell':[
+            'endothelial cell',
+        ],
+        'Stromal_cell':[
+            'fibroblast',
+        ],
+        'Plasma_cell': [
+        ],
+        'Lymphocyte':[
+            'B cell',
+            'T cell',
+        ],
+    }
 }
 
 cell_subtype = {
     'lung':'cell_type_tumor',
     'breast':'cell_type',
+    'skin':'cell_type',
 }
 
 class Config:
@@ -113,8 +133,10 @@ class Config:
 
         if any(term in args.sample.lower() for term in ['lung', 'luad', 'nsclc']):
             self.organ = 'lung'
-        elif any(term in args.sample.lower() for term in ['breast', 'brca']):
+        if any(term in args.sample.lower() for term in ['breast', 'brca']):
             self.organ = 'breast'
+        elif any(term in args.sample.lower() for term in ['skin', 'skcm']):
+            self.organ = 'skin'
 
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ == self.organ), {}) #for the organ
         self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ
