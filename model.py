@@ -216,7 +216,7 @@ def reset_parameters(module):
                 nn.init.zeros_(m.bias)
 
 class Reconstructor(nn.Module):
-    def __init__(self, out_features, in_features=in_features):
+    def __init__(self, out_features, in_features=in_features, reduction=16):
         super().__init__()
         hidden = 2048
         dropout = 0.3
@@ -227,6 +227,7 @@ class Reconstructor(nn.Module):
         self.fc2 = nn.Linear(hidden, hidden*2)
         self.norm2 = nn.LayerNorm(hidden*2)
         self.dropout2 = nn.Dropout(dropout)
+        self.feature_gate = nn.Parameter(torch.ones(out_features))
         self.fc_mean = nn.Linear(hidden*2, out_features)
         self.fc_overdispersion = nn.Linear(hidden*2, out_features)
         self.fc_probability = nn.Linear(hidden*2, out_features)
@@ -239,7 +240,7 @@ class Reconstructor(nn.Module):
         x = self.dropout1(x)
         x = F.relu(self.norm2(self.fc2(x)))        
         x = self.dropout2(x)
-        mean = F.softplus(self.fc_mean(x))
+        mean = self.feature_gate * F.softplus(self.fc_mean(x))
         overdispersion = F.softplus(self.fc_overdispersion(x))
         probability = F.sigmoid(self.fc_probability(x))
         return mean, overdispersion, probability
