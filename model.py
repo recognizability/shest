@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import NegativeBinomial
 from torch.utils.data import DataLoader, random_split
+import timm
 
 import torchvision.transforms as transforms
 import torchvision.models as models
@@ -37,7 +38,7 @@ from config import n_cores, seed, set_seed, generator, device
 from preprocess import Preprocessing
 
 sc.settings.n_jobs = n_cores
-in_features = 1000 #output features of ViT or SwinTransformer
+in_features = 1536 #output features of H-optimus-0
 
 def preprocessing(adata):
     adata.var_names_make_unique()
@@ -100,10 +101,10 @@ class Dataset():
 
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
-        image = self.images[cell_id]
-        window_image = torch.from_numpy(image['window_image'])
+        image_dict = self.images[cell_id]
+        window_image = torch.from_numpy(image_dict['window_image'])
         center = window_image.shape[1] // 2
-        nucleus = image['nucleus']
+        nucleus = image_dict['nucleus']
         nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
 
         length = 224
@@ -126,7 +127,10 @@ class Dataset():
             image = image.float().div(255)
         else:
             image = transforms.ToTensor()(image)
-        image = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(image)
+        image = transforms.Normalize(
+            mean=(0.707223, 0.578729, 0.703617),
+            std=(0.211883, 0.230117, 0.177517)
+        )(image)
 
         expression = self.expressions[i]
         label = self.labels[i]
@@ -188,13 +192,13 @@ class Dataset():
             return train_loader, test_loader
 
 class Encoder(nn.Module):
-    def __init__(self, backbone="vit_b_16"):
+    def __init__(self):
         super().__init__()
-        self.encoder = getattr(models, backbone)(weights="IMAGENET1K_V1")
+        self.encoder = timm.create_model(
+            "hf-hub:bioptimus/H-optimus-0", pretrained=True, init_values=1e-5, dynamic_img_size=True
+        )
         for param in self.encoder.parameters():
             param.requires_grad = False
-        for param in self.encoder.heads.parameters():
-            param.requires_grad = True #for only the last heads
 
     def forward(self, x):
         return self.encoder(x)
@@ -214,18 +218,18 @@ def reset_parameters(module):
 class Reconstructor(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 4096
+        hidden = 2048
         dropout = 0.3
         self.norm0 = nn.LayerNorm(in_features)
-        self.fc1 = nn.Linear(in_features, hidden//2)
-        self.norm1 = nn.LayerNorm(hidden//2)
+        self.fc1 = nn.Linear(in_features, hidden)
+        self.norm1 = nn.LayerNorm(hidden)
         self.dropout1 = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden//2, hidden)
-        self.norm2 = nn.LayerNorm(hidden)
+        self.fc2 = nn.Linear(hidden, hidden*2)
+        self.norm2 = nn.LayerNorm(hidden*2)
         self.dropout2 = nn.Dropout(dropout)
-        self.fc_mean = nn.Linear(hidden, out_features)
-        self.fc_overdispersion = nn.Linear(hidden, out_features)
-        self.fc_probability = nn.Linear(hidden, out_features)
+        self.fc_mean = nn.Linear(hidden*2, out_features)
+        self.fc_overdispersion = nn.Linear(hidden*2, out_features)
+        self.fc_probability = nn.Linear(hidden*2, out_features)
 
         reset_parameters(self)
 
@@ -243,7 +247,7 @@ class Reconstructor(nn.Module):
 class Classifier(nn.Module):
     def __init__(self, out_features, in_features=in_features):
         super().__init__()
-        hidden = 512
+        hidden = 1024
         dropout = 0.3
         self.norm0 = nn.LayerNorm(in_features)
         self.fc1 = nn.Linear(in_features, hidden)
@@ -339,7 +343,10 @@ class Modeling():
     def load(self):
         model_file = self.directory + f"models/model_{self.stem_file}_{self.cell_type}.pth"
         if not os.path.isfile(model_file) or self.train:
-            optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
+            optimizer = torch.optim.AdamW(
+                list(self.model.reconstructor.parameters()) + list(self.model.classifier.parameters()),
+                lr=self.lr
+            )
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -350,6 +357,7 @@ class Modeling():
             best_loss_classification = float('inf')
             patience = 3
             counter = 0
+            scaler = torch.amp.GradScaler(device.type)
             for epoch in range(self.epochs):
                 self.model.train()
                 train_loss_reconstruction = 0
@@ -360,21 +368,24 @@ class Modeling():
                     expression = expression.to(device, non_blocking=True)
                     label = label.to(device, non_blocking=True)
 
-                    embedding, mean, overdispersion, probability, logit = self.model(image)
-                    if torch.isnan(embedding).any():
-                        print("nan found in embedding")
-                        escape = True
-                        break
-
                     optimizer.zero_grad()
-                    loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
-                    loss_classification = self.criterion_classification(logit, label)
-                    loss = loss_reconstruction + loss_classification
-                    loss.backward()
-                    optimizer.step()
+                    with torch.autocast(device_type=device.type, dtype=torch.float16):
+                        embedding, mean, overdispersion, probability, logit = self.model(image)
+                        if torch.isnan(embedding).any():
+                            print("nan found in embedding")
+                            escape = True
+                            break
 
-                    train_loss_reconstruction += loss_reconstruction.detach()
-                    train_loss_classification += loss_classification.detach()
+                        loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
+                        loss_classification = self.criterion_classification(logit, label)
+                        loss = loss_reconstruction + loss_classification
+
+                        train_loss_reconstruction += loss_reconstruction.detach()
+                        train_loss_classification += loss_classification.detach()
+
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
 
                     del image, expression, label, embedding, mean, overdispersion, probability, logit
 
@@ -402,7 +413,8 @@ class Modeling():
                     print("The training is stopped eraly.")
                     break
 
-            torch.save(self.model.state_dict(), model_file)
+            if not escape:
+                torch.save(self.model.state_dict(), model_file)
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -437,14 +449,15 @@ class Modeling():
                 expression = expression.to(device, non_blocking=True)
                 label = label.to(device, non_blocking=True)
 
-                embedding, mean, overdispersion, probability, logit = self.model(image)
-                prediction = torch.argmax(logit, dim=1)
+                with torch.autocast(device_type=device.type, dtype=torch.float16):
+                    embedding, mean, overdispersion, probability, logit = self.model(image)
+                    prediction = torch.argmax(logit, dim=1)
 
-                loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
-                loss_classification = self.criterion_classification(logit, label)
+                    loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
+                    loss_classification = self.criterion_classification(logit, label)
 
-                test_loss_reconstruction += loss_reconstruction.detach()
-                test_loss_classification += loss_classification.detach()
+                    test_loss_reconstruction += loss_reconstruction.detach()
+                    test_loss_classification += loss_classification.detach()
 
                 images.append(image.view(image.shape[0], -1).detach().cpu())
                 expressions.append(expression.detach().cpu())
@@ -604,8 +617,9 @@ class Modeling():
                 image = image.to(device, non_blocking=True)
 
                 cell_ids.extend(cell_id)
-                embedding = self.model.encoder(image)
-                logit = self.model.classifier(embedding)
+                with torch.autocast(device_type=device.type, dtype=torch.float16):
+                    embedding = self.model.encoder(image)
+                    logit = self.model.classifier(embedding)
                 prediction = torch.argmax(logit, dim=1)
                 predictions.append(prediction.detach().cpu())
 
