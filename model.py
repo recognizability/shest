@@ -289,14 +289,12 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
 
     def forward(self, mean, overdispersion, probability, target):
         mean = mean + self.stability
-        overdispersion = overdispersion + self.stability
         probs = mean / (mean + overdispersion)
         nb = NegativeBinomial(total_count=overdispersion, probs=probs)
 
         zero_case_log_likelihood = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
         non_zero_case_log_likelihood = torch.log(1 - probability + self.stability) + nb.log_prob(target) #if target > 0
         zinb_log_likelihood = torch.where(target < self.stability, zero_case_log_likelihood, non_zero_case_log_likelihood)
-
         return -torch.mean(zinb_log_likelihood)
 
 class Modeling():
