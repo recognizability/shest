@@ -227,7 +227,6 @@ class Reconstructor(nn.Module):
         self.fc2 = nn.Linear(hidden, hidden*2)
         self.norm2 = nn.LayerNorm(hidden*2)
         self.dropout2 = nn.Dropout(dropout)
-        self.feature_gate = nn.Parameter(torch.ones(out_features))
         self.fc_mean = nn.Linear(hidden*2, out_features)
         self.fc_overdispersion = nn.Linear(hidden*2, out_features)
         self.fc_probability = nn.Linear(hidden*2, out_features)
@@ -240,7 +239,7 @@ class Reconstructor(nn.Module):
         x = self.dropout1(x)
         x = F.relu(self.norm2(self.fc2(x)))        
         x = self.dropout2(x)
-        mean = self.feature_gate * F.softplus(self.fc_mean(x))
+        mean = F.softplus(self.fc_mean(x))
         overdispersion = F.softplus(self.fc_overdispersion(x))
         probability = F.sigmoid(self.fc_probability(x))
         return mean, overdispersion, probability
@@ -291,16 +290,14 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
     def forward(self, mean, overdispersion, probability, target):
         mean = mean + self.stability
         overdispersion = overdispersion + self.stability
+        probs = mean / (mean + overdispersion)
+        nb = NegativeBinomial(total_count=overdispersion, probs=probs)
 
-        total_count = 1.0 / overdispersion
-        logits = mean.log() - (total_count + mean).log()
-        nb = NegativeBinomial(total_count=total_count, logits=logits)
-        
-        log_zero_prob = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
-        log_nonzero_prob = torch.log(1 - probability + self.stability) + nb.log_prob(target) #if target > 0
-        zero_mask = (target < self.stability).float()
-        loss = - (zero_mask * log_zero_prob + (1 - zero_mask) * log_nonzero_prob)
-        return loss.mean()
+        zero_case_log_likelihood = torch.log(probability + (1 - probability) * torch.exp(nb.log_prob(torch.zeros_like(target)))) #if target == 0
+        non_zero_case_log_likelihood = torch.log(1 - probability + self.stability) + nb.log_prob(target) #if target > 0
+        zinb_log_likelihood = torch.where(target < self.stability, zero_case_log_likelihood, non_zero_case_log_likelihood)
+
+        return -torch.mean(zinb_log_likelihood)
 
 class Modeling():
     def __init__(self, args, config):
@@ -356,7 +353,7 @@ class Modeling():
             escape = False
             best_loss_reconstruction = float('inf')
             best_loss_classification = float('inf')
-            patience = 3
+            patience = 5
             counter = 0
             scaler = torch.amp.GradScaler(device.type)
             for epoch in range(self.epochs):
@@ -372,23 +369,34 @@ class Modeling():
                     optimizer.zero_grad()
                     with torch.autocast(device_type=device.type, dtype=torch.float16):
                         embedding, mean, overdispersion, probability, logit = self.model(image)
-                        if torch.isnan(embedding).any():
-                            print("nan found in embedding")
-                            escape = True
-                            break
 
                         loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
                         loss_classification = self.criterion_classification(logit, label)
+
+                        tensors = [embedding, mean, overdispersion, probability, loss_reconstruction, loss_classification]
+                        names = ["embedding", "mean", "overdispersion", "probability", "loss_reconstruction", "loss_classification"]
+                        for tensor, name in zip(tensors, names):
+                            if torch.isnan(tensor).any():
+                                print(f"nan found in {name}")
+                                escape = True
+                                break
+                            elif torch.isinf(tensor).any():
+                                print(f"inf found in {name}")
+                                escape = True
+                                break
+
                         loss = loss_reconstruction + loss_classification
 
                         train_loss_reconstruction += loss_reconstruction.detach()
                         train_loss_classification += loss_classification.detach()
 
+                    del image, expression, label, embedding, mean, overdispersion, probability, logit
+                    if escape:
+                        break
+
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
-
-                    del image, expression, label, embedding, mean, overdispersion, probability, logit
 
                 if escape:
                     break
@@ -542,11 +550,11 @@ class Modeling():
 
         sc.pp.normalize_total(adata_actual, target_sum=1e4)
         sc.pp.log1p(adata_actual)
-        adata_actual.obs[self.cell_type] = adata_actual.obs[self.cell_type].astype('category')
+        adata_actual.obs[self.cell_type] = adata_actual.obs[self.cell_type].astype(pd.CategoricalDtype(categories=self.cell_types, ordered=True))
 
         sc.pp.normalize_total(adata_reconstruction, target_sum=1e4)
         sc.pp.log1p(adata_reconstruction)
-        adata_reconstruction.obs[self.cell_type] = adata_reconstruction.obs[self.cell_type].astype('category')
+        adata_reconstruction.obs[self.cell_type] = adata_reconstruction.obs[self.cell_type].astype(pd.CategoricalDtype(categories=self.cell_types, ordered=True))
         
         sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type)
         top_markers = []
@@ -554,19 +562,17 @@ class Modeling():
             top_markers.append(sc.get.rank_genes_groups_df(adata_actual, group=cell_type)['names'].values[:10].tolist())
         top_markers = sum(top_markers, [])
         
-        sc.tl.dendrogram(adata_actual, groupby=self.cell_type)
-        sc.tl.dendrogram(adata_reconstruction, groupby=self.cell_type)
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type)
 
         cell_type_order = adata_actual.obs[self.cell_type].cat.categories.tolist()
         adata_actual.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
         adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
 
-        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=True, show_gene_labels=True)
+        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_actual.png")
         plt.close()
-        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=True, show_gene_labels=True)
+        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_reconstruction.png")
         plt.close()
