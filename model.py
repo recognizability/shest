@@ -34,7 +34,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from config import n_cores, seed, set_seed, generator, device
+from config import n_cores, seed, set_seed, generator, device, gene_panel
 from preprocess import Preprocessing
 
 sc.settings.n_jobs = n_cores
@@ -53,6 +53,8 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
+        self.tile = args.tile
+        self.downscale = args.downscale
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -89,7 +91,10 @@ class Dataset():
         self.classes = config.classes
 
     def __len__(self):
-        return len(self.cell_ids)
+        if not self.downscale:
+            return len(self.cell_ids)
+        else:
+            return len(self.cell_ids) * 2
 
     def _resize(self, image, size):
         return F.interpolate(image.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze()
@@ -100,7 +105,14 @@ class Dataset():
         return weight
 
     def __getitem__(self, i):
-        cell_id = self.cell_ids[i]
+        if not self.downscale:
+            j = i
+            augment_type = 0
+        else:
+            j = i // 2
+            augment_type = i % 2
+
+        cell_id = self.cell_ids[j]
         image_dict = self.images[cell_id]
         window_image = torch.from_numpy(image_dict['window_image'])
         center = window_image.shape[1] // 2
@@ -108,32 +120,37 @@ class Dataset():
         nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
 
         length = 224
-        half = length // 2
+        if not self.tile:
+            image = self._resize(window_image, length)
+        else:
+            half = length // 2
 
-        weight = self._weight(half).to(window_image.device).unsqueeze(0)
+            weight = self._weight(half).to(window_image.device).unsqueeze(0)
 
-        image_top_left = self._resize(window_image, half)
-        image_top_right = image_top_left * weight
-        image_bottom_left = self._resize(nucleus_image, half)
-        image_bottom_right = image_bottom_left * weight
+            image_top_left = self._resize(window_image, half)
+            image_top_right = image_top_left * weight
+            image_bottom_left = self._resize(nucleus_image, half)
+            image_bottom_right = image_bottom_left * weight
 
-        image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
-        image[:, :half, :half] = image_top_left
-        image[:, :half, half:] = image_top_right
-        image[:, half:, :half] = image_bottom_left
-        image[:, half:, half:] = image_bottom_right
+            image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
+            image[:, :half, :half] = image_top_left
+            image[:, :half, half:] = image_top_right
+            image[:, half:, :half] = image_bottom_left
+            image[:, half:, half:] = image_bottom_right
 
         if isinstance(image, torch.Tensor):
             image = image.float().div(255)
         else:
             image = transforms.ToTensor()(image)
-        image = transforms.Normalize(
-            mean=(0.707223, 0.578729, 0.703617),
-            std=(0.211883, 0.230117, 0.177517)
-        )(image)
 
-        expression = self.expressions[i]
-        label = self.labels[i]
+        if augment_type == 1:
+            image = F.avg_pool2d(image.unsqueeze(0), kernel_size=2, stride=2) #downscaling
+            image = image.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3).squeeze(0) #restore the size
+
+        image = transforms.Normalize(mean=(0.707223, 0.578729, 0.703617), std=(0.211883, 0.230117, 0.177517))(image) #from H-optimus-0
+
+        expression = self.expressions[j]
+        label = self.labels[j]
 
         return cell_id, image, expression, label
 
@@ -554,38 +571,48 @@ class Modeling():
         sc.pp.log1p(adata_reconstruction)
         adata_reconstruction.obs[self.cell_type] = adata_reconstruction.obs[self.cell_type].astype(pd.CategoricalDtype(categories=self.cell_types, ordered=True))
         
-        sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type)
-        top_markers = []
-        for cell_type in self.cell_types:
-            top_markers.append(sc.get.rank_genes_groups_df(adata_actual, group=cell_type)['names'].values[:10].tolist())
-        top_markers = sum(top_markers, [])
-        
-        sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type)
-
         cell_type_order = adata_actual.obs[self.cell_type].cat.categories.tolist()
         adata_actual.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
         adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
 
-        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True)
+        sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type, method='wilcoxon')
+        sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type, method='wilcoxon')
+
+        top_markers = {}
+        top_markers_df = pd.DataFrame()
+        for cell_type in self.cell_types:
+            df = sc.get.rank_genes_groups_df(adata_actual, group=cell_type).iloc[:10]
+            df[self.cell_type] = cell_type
+            top_markers[cell_type] = df["names"].values.tolist()
+            top_markers_df = pd.concat([top_markers_df, df], ignore_index=True)
+        top_markers_df.to_csv(self.directory + f"results/top_markers_{self.stem_file}_{self.cell_type}.csv", index=False)
+
+        sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True, var_group_rotation=0)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_actual.png")
         plt.close()
-        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True)
+        sc.pl.rank_genes_groups_heatmap(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True, var_group_rotation=0)
         plt.tight_layout()
         plt.savefig("/tmp/heatmap_reconstruction.png")
         plt.close()
-
-        fig, ax = plt.subplots(2, figsize=(12, 10))
+        fig, ax = plt.subplots(2, figsize=(12, 8))
         ax[0].imshow(mpimg.imread("/tmp/heatmap_actual.png"))
         ax[0].axis('off')
         ax[0].set_title("Actual")
-
         ax[1].imshow(mpimg.imread("/tmp/heatmap_reconstruction.png"))
         ax[1].axis('off')
         ax[1].set_title("Reconstructed")
-
         plt.tight_layout()
-        plt.savefig(self.directory + f"results/expression_{self.stem_file}_{self.cell_type}.png")
+        plt.savefig(self.directory + f"results/expression_heatmap_{self.stem_file}_{self.cell_type}.png")
+        plt.close()
+
+        fig, ax = plt.subplots(2, figsize=(14, 7))
+        sc.pl.rank_genes_groups_dotplot(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, var_group_rotation=0, ax=ax[0])
+        ax[0].set_title("Actual")
+        sc.pl.rank_genes_groups_dotplot(adata_reconstruction, var_names=top_markers, show=False, use_raw=False, dendrogram=False, var_group_rotation=0, ax=ax[1])
+        ax[1].set_title("Reconstructed")
+        plt.tight_layout()
+        plt.savefig(self.directory + f"results/exression_dotplot_{self.stem_file}_{self.cell_type}.png")
         plt.close()
 
     def draw_confusion_matrix(self):
@@ -615,6 +642,7 @@ class Modeling():
         self.model.eval()
         cell_ids = []
         predictions = []
+        expressions = []
         
         print(f"Inferring with the {self.cell_type} prediction model ...")
         with torch.no_grad():
@@ -623,15 +651,20 @@ class Modeling():
 
                 cell_ids.extend(cell_id)
                 with torch.autocast(device_type=device.type, dtype=torch.float16):
-                    embedding = self.model.encoder(image)
-                    logit = self.model.classifier(embedding)
+                    embedding, mean, overdispersion, probability, logit = self.model(image)
                 prediction = torch.argmax(logit, dim=1)
                 predictions.append(prediction.detach().cpu())
+                expressions.append(mean.detach().cpu())
 
         predictions = torch.cat(predictions).numpy()
         predictions = self.label_encoder.inverse_transform(predictions)
+        adata = anndata.AnnData(
+            X = torch.cat(expressions).numpy(),
+            var = pd.DataFrame(index=gene_panel),
+            obs = pd.DataFrame({self.cell_type: predictions}, index=cell_ids)
+        )
             
         gc.collect()
         torch.cuda.empty_cache()
 
-        return pd.Series(predictions, index=cell_ids)
+        return adata

@@ -21,7 +21,7 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from config import n_cores, seed, set_seed
+from config import n_cores, seed, set_seed, gene_panel
 
 sc.settings.n_jobs = n_cores
 
@@ -47,7 +47,6 @@ class Preprocessing():
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
         adata_raw = self.sdata.tables['table']
-        gene_panel = pd.read_csv('/data0/Xenium_Prime/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name']
         self.adata = adata_raw[:, adata_raw.var_names.isin(gene_panel)].copy()
         self.adata.obs.index = self.adata.obs['cell_id']
 
@@ -181,7 +180,7 @@ class Preprocessing():
                 continue
             self.images[cell_id] = {
                 'window_image': self.he_image_array[:, y_start:y_end, x_start:x_end],
-                'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)),
+                'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)), #without inverse affine transform
             }
         self.image_ids = list(self.images.keys())
         print(len(self.image_ids))

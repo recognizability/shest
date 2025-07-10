@@ -1,6 +1,7 @@
 import os
 import random
 import numpy as np
+import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 import torch
 import multiprocessing as mp
@@ -11,6 +12,7 @@ n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
 generator = torch.Generator().manual_seed(seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+gene_panel = pd.read_csv('/data0/Xenium_Prime/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name']
 
 def set_seed(seed=seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
