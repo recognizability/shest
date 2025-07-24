@@ -16,7 +16,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", type=str, default="10X", help="Data source")
     parser.add_argument("--sample", type=str, default="Human_Lung_Cancer", help="Sample name")
     parser.add_argument("--filter", action="store_true", help="Force filtration by the cell area")
-    parser.add_argument("--tile", action="store_true", help="Make the image to quadruple tiles")
+    parser.add_argument("--original_image", action="store_true", help="Use the original imagem not the quadruple tiles")
     parser.add_argument("--downscale", action="store_true", help="Downscaling the images")
     parser.add_argument("--cell_type", type=str, default="cell_type", help="Cell type to consider")
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")

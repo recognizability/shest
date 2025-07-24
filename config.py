@@ -54,13 +54,13 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Fibroblast alveolar',
             'Fibroblast peribronchial',
             'Smooth muscle cell',
-#            'Mesothelial',
             'Pericyte',
         ],
         'Plasma_cell': [
             'Plasma cell',
         ],
         'Lymphocyte': [
+#            'Plasma cell', #added
             'B cell',
             'T cell regulatory',
             'T cell CD4',

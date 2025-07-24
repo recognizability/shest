@@ -53,7 +53,7 @@ def preprocessing(adata):
 class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
-        self.tile = args.tile
+        self.original_image = args.original_image
         self.downscale = args.downscale
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
@@ -120,7 +120,7 @@ class Dataset():
         nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
 
         length = 224
-        if not self.tile:
+        if self.original_image:
             image = self._resize(window_image, length)
         else:
             half = length // 2
@@ -652,16 +652,22 @@ class Modeling():
                 cell_ids.extend(cell_id)
                 with torch.autocast(device_type=device.type, dtype=torch.float16):
                     embedding, mean, overdispersion, probability, logit = self.model(image)
-                prediction = torch.argmax(logit, dim=1)
+#                prediction = torch.argmax(logit, dim=1)
+                probability, prediction = torch.max(torch.softmax(logit, dim=1), dim=1)
+                prediction[probability < 0.9] = -1
                 predictions.append(prediction.detach().cpu())
                 expressions.append(mean.detach().cpu())
 
         predictions = torch.cat(predictions).numpy()
-        predictions = self.label_encoder.inverse_transform(predictions)
+#        predictions = self.label_encoder.inverse_transform(predictions)
+        mask = predictions == -1
+        predictions_masked = np.empty(predictions.shape, dtype=object)
+        predictions_masked[mask] = np.nan
+        predictions_masked[~mask] = self.label_encoder.inverse_transform(predictions[~mask])
         adata = anndata.AnnData(
             X = torch.cat(expressions).numpy(),
             var = pd.DataFrame(index=gene_panel),
-            obs = pd.DataFrame({self.cell_type: predictions}, index=cell_ids)
+            obs = pd.DataFrame({self.cell_type: predictions_masked}, index=cell_ids)
         )
             
         gc.collect()
