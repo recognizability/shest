@@ -6,15 +6,19 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 import torch
-import torchvision.transforms as transforms
+#import torchvision.transforms as transforms
 
 import spatialdata as sd
 from spatialdata.transformations import get_transformation
 import spatialdata_plot
 from spatialdata_io import xenium
 
+from cellpose import models, io
+from skimage.measure import regionprops, find_contours
+
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor
+#from concurrent.futures import ThreadPoolExecutor
+from joblib import Parallel, delayed
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -62,7 +66,7 @@ class Preprocessing():
         self.cell_ids = None
         
         self.sc_annotation()
-        self.cell_area_filter()
+        self.cell_filter()
         self.annotation()
 
     def _prepare_sdata(self, path):
@@ -142,7 +146,7 @@ class Preprocessing():
         else:
             return x_transformed, y_transformed
 
-    def cell_area_filter(self):
+    def cell_filter(self):
         bounds = self.nucleus_boundaries.bounds
         bounds['width'] = bounds['maxx'] - bounds['minx']
         bounds['height'] = bounds['maxy'] - bounds['miny']
@@ -168,7 +172,10 @@ class Preprocessing():
         print("Filtering rectangular cell regions ... ", end='')
         self.images = {}
         window = int(np.ceil(self.upper / self.pixel_size))
-        for bound in bounds.itertuples():
+        io.logger_setup()
+        model = models.CellposeModel(gpu=True)
+
+        for bound in tqdm(bounds.itertuples(), total=len(bounds)):
             cell_id = bound.Index
             cx = bound.centroid_x
             cy = bound.centroid_y
@@ -178,10 +185,16 @@ class Preprocessing():
             y_end = cy + window//2 + 1
             if x_start < 0 or y_start < 0 or self.image_width <= x_end or self.image_height <= y_end:
                 continue
+            window_image = self.he_image_array[:, y_start:y_end, x_start:x_end].astype(np.float32)
+#            try:
+#                model.eval(window_image)
+#            except:
+#                continue
             self.images[cell_id] = {
-                'window_image': self.he_image_array[:, y_start:y_end, x_start:x_end],
+                'window_image': window_image,
                 'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)), #without inverse affine transform
             }
+
         self.image_ids = list(self.images.keys())
         print(len(self.image_ids))
 

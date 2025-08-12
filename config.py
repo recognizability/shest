@@ -60,7 +60,6 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Plasma cell',
         ],
         'Lymphocyte': [
-#            'Plasma cell', #added
             'B cell',
             'T cell regulatory',
             'T cell CD4',
@@ -137,8 +136,10 @@ class Config:
             self.organ = 'lung'
         if any(term in args.sample.lower() for term in ['breast', 'brca']):
             self.organ = 'breast'
-        elif any(term in args.sample.lower() for term in ['skin', 'skcm']):
+        if any(term in args.sample.lower() for term in ['skin', 'skcm']):
             self.organ = 'skin'
+        else:
+            self.organ = args.organ.lower()
 
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ == self.organ), {}) #for the organ
         self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ

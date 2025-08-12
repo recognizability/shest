@@ -54,7 +54,6 @@ class Dataset():
     def __init__(self, args, config):
         self.directory = args.directory
         self.original_image = args.original_image
-        self.downscale = args.downscale
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -66,7 +65,7 @@ class Dataset():
         data = Preprocessing(args, config)
 
         processing_directory = self.directory + 'dataset/' + config.stem_directory
-        self.images = data.images
+        self.images_raw = data.images
         self.image_ids = data.image_ids
         print(len(self.image_ids), "images of the cells are prepared.")
 
@@ -79,6 +78,8 @@ class Dataset():
         self.cell_ids = sorted(list(set(self.image_ids) & set(type_ids)))
         print('Common', len(self.cell_ids), "cells are selected.")
 
+        self.images = self._image_load()
+
         self.adata = self.adata_raw[self.cell_ids, :].copy()
         self.cell_type_encoded = self.cell_type + '_encoded'
         self.label_encoder = config.label_encoder
@@ -90,12 +91,6 @@ class Dataset():
         self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
         self.classes = config.classes
 
-    def __len__(self):
-        if not self.downscale:
-            return len(self.cell_ids)
-        else:
-            return len(self.cell_ids) * 2
-
     def _resize(self, image, size):
         return F.interpolate(image.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze()
 
@@ -104,53 +99,57 @@ class Dataset():
         weight = ((coords[:, None]**2 + coords[None, :]**2 - 2) / 2)**2
         return weight
 
+    def _image_load(self):
+        images = []
+        print("Image processing ... ", end='')
+        for cell_id in self.cell_ids:
+            image_dict = self.images_raw[cell_id]
+            window_image = torch.from_numpy(image_dict['window_image'])
+            center = window_image.shape[1] // 2
+            nucleus = image_dict['nucleus']
+            nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
+
+            length = 224
+            if self.original_image:
+                image = self._resize(window_image, length)
+            else:
+                half = length // 2
+
+                image_top_left = self._resize(window_image, half)
+                image_bottom_left = self._resize(nucleus_image, half)
+
+                weight = self._weight(half).to(window_image.device).unsqueeze(0)
+                image_top_right = image_top_left * weight
+                image_bottom_right = image_bottom_left * weight
+
+                image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
+                image[:, :half, :half] = image_top_left
+                image[:, :half, half:] = image_top_right
+                image[:, half:, :half] = image_bottom_left
+                image[:, half:, half:] = image_bottom_right
+
+            if isinstance(image, torch.Tensor):
+                image = image.float().div(255)
+            else:
+                image = transforms.ToTensor()(image)
+
+            image = transforms.Normalize(mean=(0.707223, 0.578729, 0.703617), std=(0.211883, 0.230117, 0.177517))(image) #from H-optimus-0
+
+            images.append(image)
+
+        images = torch.stack(images).contiguous()
+
+        print(len(images), "images are loaded.")
+        return images
+
+    def __len__(self):
+        return len(self.cell_ids)
+
     def __getitem__(self, i):
-        if not self.downscale:
-            j = i
-            augment_type = 0
-        else:
-            j = i // 2
-            augment_type = i % 2
-
-        cell_id = self.cell_ids[j]
-        image_dict = self.images[cell_id]
-        window_image = torch.from_numpy(image_dict['window_image'])
-        center = window_image.shape[1] // 2
-        nucleus = image_dict['nucleus']
-        nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
-
-        length = 224
-        if self.original_image:
-            image = self._resize(window_image, length)
-        else:
-            half = length // 2
-
-            weight = self._weight(half).to(window_image.device).unsqueeze(0)
-
-            image_top_left = self._resize(window_image, half)
-            image_top_right = image_top_left * weight
-            image_bottom_left = self._resize(nucleus_image, half)
-            image_bottom_right = image_bottom_left * weight
-
-            image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
-            image[:, :half, :half] = image_top_left
-            image[:, :half, half:] = image_top_right
-            image[:, half:, :half] = image_bottom_left
-            image[:, half:, half:] = image_bottom_right
-
-        if isinstance(image, torch.Tensor):
-            image = image.float().div(255)
-        else:
-            image = transforms.ToTensor()(image)
-
-        if augment_type == 1:
-            image = F.avg_pool2d(image.unsqueeze(0), kernel_size=2, stride=2) #downscaling
-            image = image.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3).squeeze(0) #restore the size
-
-        image = transforms.Normalize(mean=(0.707223, 0.578729, 0.703617), std=(0.211883, 0.230117, 0.177517))(image) #from H-optimus-0
-
-        expression = self.expressions[j]
-        label = self.labels[j]
+        cell_id = self.cell_ids[i]
+        image = self.images[i]
+        expression = self.expressions[i]
+        label = self.labels[i]
 
         return cell_id, image, expression, label
 
@@ -339,7 +338,7 @@ class Modeling():
         self.train = args.train
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
-        torch.compile(self.model)
+        torch.compile(self.model, mode="reduce-overhead", dynamic=True)
 
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
         self.criterion_classification = nn.CrossEntropyLoss()
@@ -355,6 +354,7 @@ class Modeling():
 
     def load(self):
         model_file = self.directory + f"models/model_{self.stem_file}_{self.cell_type}.pth"
+        weights_file = self.directory + f"models/weight_{self.stem_file}_{self.cell_type}.pth"
         if not os.path.isfile(model_file) or self.train:
             optimizer = torch.optim.AdamW(
                 list(self.model.reconstructor.parameters()) + list(self.model.classifier.parameters()),
@@ -402,10 +402,9 @@ class Modeling():
 
                         loss = loss_reconstruction + loss_classification
 
-                        train_loss_reconstruction += loss_reconstruction.detach()
-                        train_loss_classification += loss_classification.detach()
+                    del image, expression, label
+                    torch.cuda.empty_cache()
 
-                    del image, expression, label, embedding, mean, overdispersion, probability, logit
                     if escape:
                         break
 
@@ -413,6 +412,11 @@ class Modeling():
                     scaler.step(optimizer)
                     scaler.update()
 
+                    train_loss_reconstruction += loss_reconstruction.detach()
+                    train_loss_classification += loss_classification.detach()
+
+                    del embedding, mean, overdispersion, probability, logit, loss, loss_reconstruction, loss_classification
+                    torch.cuda.empty_cache()
                 if escape:
                     break
 
@@ -438,7 +442,8 @@ class Modeling():
                     break
 
             if not escape:
-                torch.save(self.model.state_dict(), model_file)
+                torch.save(self.model.state_dict(), weight_file)
+                torch.save(self.model, model_file)
 
             gc.collect()
             torch.cuda.empty_cache()
@@ -575,16 +580,19 @@ class Modeling():
         adata_actual.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
         adata_reconstruction.uns[self.cell_type+'_colors'] = [self.palette[cell_type] for cell_type in cell_type_order]
 
+        adata_actual = adata_actual[adata_actual.obs[self.cell_type].map(adata_actual.obs[self.cell_type].value_counts() > 1)]
         sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type, method='wilcoxon')
+        adata_reconstruction = adata_reconstruction[adata_reconstruction.obs[self.cell_type].map(adata_reconstruction.obs[self.cell_type].value_counts() > 1)]
         sc.tl.rank_genes_groups(adata_reconstruction, groupby=self.cell_type, method='wilcoxon')
 
         top_markers = {}
         top_markers_df = pd.DataFrame()
         for cell_type in self.cell_types:
-            df = sc.get.rank_genes_groups_df(adata_actual, group=cell_type).iloc[:10]
-            df[self.cell_type] = cell_type
-            top_markers[cell_type] = df["names"].values.tolist()
-            top_markers_df = pd.concat([top_markers_df, df], ignore_index=True)
+            if cell_type in adata_actual.obs[self.cell_type].unique():
+                df = sc.get.rank_genes_groups_df(adata_actual, group=cell_type).iloc[:10]
+                df[self.cell_type] = cell_type
+                top_markers[cell_type] = df["names"].values.tolist()
+                top_markers_df = pd.concat([top_markers_df, df], ignore_index=True)
         top_markers_df.to_csv(self.directory + f"results/top_markers_{self.stem_file}_{self.cell_type}.csv", index=False)
 
         sc.pl.rank_genes_groups_heatmap(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, show_gene_labels=True, var_group_rotation=0)
@@ -652,14 +660,12 @@ class Modeling():
                 cell_ids.extend(cell_id)
                 with torch.autocast(device_type=device.type, dtype=torch.float16):
                     embedding, mean, overdispersion, probability, logit = self.model(image)
-#                prediction = torch.argmax(logit, dim=1)
                 probability, prediction = torch.max(torch.softmax(logit, dim=1), dim=1)
                 prediction[probability < 0.9] = -1
                 predictions.append(prediction.detach().cpu())
                 expressions.append(mean.detach().cpu())
 
         predictions = torch.cat(predictions).numpy()
-#        predictions = self.label_encoder.inverse_transform(predictions)
         mask = predictions == -1
         predictions_masked = np.empty(predictions.shape, dtype=object)
         predictions_masked[mask] = np.nan
