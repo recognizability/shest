@@ -28,184 +28,16 @@ import timm
 
 import torchvision.transforms as transforms
 import torchvision.models as models
-from conch.open_clip_custom import create_model_from_pretrained
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
-from config import n_cores, seed, set_seed, generator, device, gene_panel
+from config import n_cores, seed, set_seed, generator, device
 from preprocess import Preprocessing
 
 sc.settings.n_jobs = n_cores
 in_features = 1536 #output features of H-optimus-0
-
-def preprocessing(adata):
-    adata.var_names_make_unique()
-    adata.obs_names_make_unique()
-    
-    adata.var['mt'] = adata.var_names.str.startswith('MT-')
-    sc.pp.calculate_qc_metrics(adata, qc_vars=['mt'], percent_top=None, log1p=False, inplace=True)
-    adata = adata[adata.obs.pct_counts_mt < 5, :].copy()
-
-    return adata
-
-class Dataset():
-    def __init__(self, args, config):
-        self.directory = args.directory
-        self.original_image = args.original_image
-        self.cell_type = args.cell_type
-        self.cell_types = config.cell_types
-        self.cell_subtypes = config.cell_subtypes
-        self.palette_type = config.palette_type
-        self.palette_subtype = config.palette_subtype
-        self.batch_size = args.batch_size
-        self.stem_file = config.stem_file
-
-        data = Preprocessing(args, config)
-
-        processing_directory = self.directory + 'dataset/' + config.stem_directory
-        self.images_raw = data.images
-        self.image_ids = data.image_ids
-        print(len(self.image_ids), "images of the cells are prepared.")
-
-        print('Expression profile and their cell types loading ... ', end='')
-        self.adata_raw = data.adata
-        print(self.adata_raw.shape)
-        type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
-        print(len(type_ids), "of annotated cells are loaded.")
-
-        self.cell_ids = sorted(list(set(self.image_ids) & set(type_ids)))
-        print('Common', len(self.cell_ids), "cells are selected.")
-
-        self.images = self._image_load()
-
-        self.adata = self.adata_raw[self.cell_ids, :].copy()
-        self.cell_type_encoded = self.cell_type + '_encoded'
-        self.label_encoder = config.label_encoder
-        self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
-        self.genes = self.adata.var_names.tolist()
-
-        cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
-        self.expressions = torch.from_numpy(self.adata.X[cell_indices].toarray()).float()
-        self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
-        self.classes = config.classes
-
-    def _resize(self, image, size):
-        return F.interpolate(image.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze()
-
-    def _weight(self, steps):
-        coords = torch.linspace(-1, 1, steps=steps)
-        weight = ((coords[:, None]**2 + coords[None, :]**2 - 2) / 2)**2
-        return weight
-
-    def _image_load(self):
-        images = []
-        print("Image processing ... ", end='')
-        for cell_id in self.cell_ids:
-            image_dict = self.images_raw[cell_id]
-            window_image = torch.from_numpy(image_dict['window_image'])
-            center = window_image.shape[1] // 2
-            nucleus = image_dict['nucleus']
-            nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
-
-            length = 224
-            if self.original_image:
-                image = self._resize(window_image, length)
-            else:
-                half = length // 2
-
-                image_top_left = self._resize(window_image, half)
-                image_bottom_left = self._resize(nucleus_image, half)
-
-                weight = self._weight(half).to(window_image.device).unsqueeze(0)
-                image_top_right = image_top_left * weight
-                image_bottom_right = image_bottom_left * weight
-
-                image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
-                image[:, :half, :half] = image_top_left
-                image[:, :half, half:] = image_top_right
-                image[:, half:, :half] = image_bottom_left
-                image[:, half:, half:] = image_bottom_right
-
-            if isinstance(image, torch.Tensor):
-                image = image.float().div(255)
-            else:
-                image = transforms.ToTensor()(image)
-
-            image = transforms.Normalize(mean=(0.707223, 0.578729, 0.703617), std=(0.211883, 0.230117, 0.177517))(image) #from H-optimus-0
-
-            images.append(image)
-
-        images = torch.stack(images).contiguous()
-
-        print(len(images), "images are loaded.")
-        return images
-
-    def __len__(self):
-        return len(self.cell_ids)
-
-    def __getitem__(self, i):
-        cell_id = self.cell_ids[i]
-        image = self.images[i]
-        expression = self.expressions[i]
-        label = self.labels[i]
-
-        return cell_id, image, expression, label
-
-    def draw_umaps_expression(self):
-        cell_types = self.adata_raw.obs.columns
-        fig, ax = plt.subplots(
-            nrows=4,
-            ncols=4,
-            figsize=(6+6+6+6, 6+4+2+4),
-            gridspec_kw={
-                'width_ratios': [1, 1, 1, 1],
-                'height_ratios': [1.5, 1, 0.5, 1]
-            }
-        )
-        ax[0][1].axis('off')
-        ax[1][1].axis('off')
-        indices = {'expression':0, 'morphology':1, 'annotation':2}
-        for cell_type in cell_types:
-            if 'subtype' in cell_type:
-                reindex = self.cell_subtypes
-                palette = self.palette_subtype
-                i = 0
-            else:
-                reindex = self.cell_types.keys()
-                palette = self.palette_type
-                i = 2
-            j = next((index for string, index in indices.items() if string in cell_type), 3)
-            counts = pd.DataFrame(self.adata_raw.obs.groupby(cell_type, observed=False).apply(len, include_groups=False), columns=['']).reindex(reindex).T
-            ax[i][j] = sns.barplot(
-               counts,
-               orient = 'h',
-               palette = palette,
-               ax=ax[i][j]
-            )
-            ax[i][j].set_xlim(0, counts.max(axis=None, skipna=True) * 1.2 if pd.notna(counts.max(axis=None)) else 1)
-            ax[i][j].set_title(f"n={counts.sum(axis=1).values[0]}")
-            for container in ax[i][j].containers:
-                ax[i][j].bar_label(container)
-            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None, size=1)
-        fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
-        plt.close()
-
-    def loader(self, split=0.8):
-        total = len(self)
-        if split==1 or split==0:
-            data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            return data_loader
-        else:
-            train_size = int(split * total)
-            test_size = total - train_size
-            train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
-            print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            return train_loader, test_loader
 
 class Encoder(nn.Module):
     def __init__(self):
@@ -314,28 +146,31 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
         return -torch.mean(zinb_log_likelihood)
 
 class Modeling():
-    def __init__(self, args, config):
+    def __init__(self, args, config, dataset=None, stem_file=None):
         self.directory = args.directory
-        self.stem_file = config.stem_file
+        self.stem_file = stem_file
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.palette = self.palette_subtype if self.cell_type == 'cell_subtype_expression' else self.palette_type
 
-        dataset = Dataset(args, config)
-        dataset.draw_umaps_expression()
-        self.train_loader, self.test_loader = dataset.loader()
+        if dataset is not None or args.mode == 'train' or args.mode == 'test':
+#            dataset.draw_umaps_expression()
+            self.train_loader, self.test_loader = dataset.loader()
 
-        self.genes = dataset.genes
-        self.n_genes = len(self.genes)
+            self.genes = dataset.genes
+            self.n_genes = len(self.genes)
+        else:
+            self.n_genes = 5001
+            
         self.label_encoder = config.label_encoder
         self.classes = config.classes
         self.n_classes = len(self.classes)
 
         self.epochs = args.epochs
         self.lr = args.lr
-        self.train = args.train
+        self.mode = args.mode
         self.model = Model(n_genes = self.n_genes, n_classes=self.n_classes)
         self.model.to(device)
         torch.compile(self.model, mode="reduce-overhead", dynamic=True)
@@ -350,12 +185,14 @@ class Modeling():
         self.labels = None
         self.predictions = None
 
+        self.gene_panel = config.gene_panel
+
         self.load()
 
     def load(self):
         model_file = self.directory + f"models/model_{self.stem_file}_{self.cell_type}.pth"
-        weights_file = self.directory + f"models/weight_{self.stem_file}_{self.cell_type}.pth"
-        if not os.path.isfile(model_file) or self.train:
+        weights_file = self.directory + f"models/weights_{self.stem_file}_{self.cell_type}.pth"
+        if not os.path.isfile(weights_file) or self.mode=='train':
             optimizer = torch.optim.AdamW(
                 list(self.model.reconstructor.parameters()) + list(self.model.classifier.parameters()),
                 lr=self.lr
@@ -442,7 +279,7 @@ class Modeling():
                     break
 
             if not escape:
-                torch.save(self.model.state_dict(), weight_file)
+                torch.save(self.model.state_dict(), weights_file)
                 torch.save(self.model, model_file)
 
             gc.collect()
@@ -450,7 +287,7 @@ class Modeling():
 
         else: 
             print(f"Loading weights from {model_file} ...")
-            self.model.load_state_dict(torch.load(model_file, map_location=device))
+            self.model.load_state_dict(torch.load(weights_file, map_location=device))
 
     def evaluate(self, test_loader=None):
         if test_loader is None:
@@ -672,7 +509,7 @@ class Modeling():
         predictions_masked[~mask] = self.label_encoder.inverse_transform(predictions[~mask])
         adata = anndata.AnnData(
             X = torch.cat(expressions).numpy(),
-            var = pd.DataFrame(index=gene_panel),
+            var = pd.DataFrame(index=self.gene_panel),
             obs = pd.DataFrame({self.cell_type: predictions_masked}, index=cell_ids)
         )
             

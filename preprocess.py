@@ -1,4 +1,5 @@
 import os
+import gc
 import argparse
 import json
 import pickle
@@ -6,18 +7,16 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 import torch
-#import torchvision.transforms as transforms
 
 import spatialdata as sd
 from spatialdata.transformations import get_transformation
 import spatialdata_plot
 from spatialdata_io import xenium
 
-from cellpose import models, io
 from skimage.measure import regionprops, find_contours
 
 from tqdm import tqdm
-#from concurrent.futures import ThreadPoolExecutor
+import joblib
 from joblib import Parallel, delayed
 
 import matplotlib.pyplot as plt
@@ -25,15 +24,16 @@ import seaborn as sns
 import scanpy as sc
 import tacco as tc
 
-from config import n_cores, seed, set_seed, gene_panel
+from config import n_cores, seed, set_seed
 
 sc.settings.n_jobs = n_cores
 
 class Preprocessing():
-    def __init__(self, args, config):
+    def __init__(self, args, config, source, sample):
         self.raw_directory = args.raw_directory
-        self.sample = args.sample
-        self.stem_file = config.stem_file
+        self.source = source
+        self.sample = sample
+        self.stem_file = f"{args.platform}_{source}_{sample}"
         self.directory = args.directory
         self.sc_annotate = args.sc_annotate
         self.organ = config.organ
@@ -42,19 +42,20 @@ class Preprocessing():
         self.cell_subtypes = config.cell_subtypes
         self.subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
 
-        self.pixel_size = json.load(open(self.raw_directory + config.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
+        self.stem_directory = f"{args.platform}/{source}/{sample}/"
+        self.pixel_size = json.load(open(self.raw_directory + self.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower = 3 #micrometers
         self.upper = 18 #micrometers
         self.filter = args.filter
 
-        self.sdata = self._prepare_sdata(self.raw_directory + config.stem_directory)
+        self.sdata = self._prepare_sdata()
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
         adata_raw = self.sdata.tables['table']
-        self.adata = adata_raw[:, adata_raw.var_names.isin(gene_panel)].copy()
+        self.adata = adata_raw[:, adata_raw.var_names.isin(config.gene_panel)].copy() 
         self.adata.obs.index = self.adata.obs['cell_id']
 
-        self.processing_directory = self.directory + 'dataset/' + config.stem_directory
+        self.processing_directory = self.directory + 'dataset/' + self.stem_directory
         os.makedirs(self.processing_directory, exist_ok=True)
 
         self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values #y, x, c
@@ -69,16 +70,17 @@ class Preprocessing():
         self.cell_filter()
         self.annotation()
 
-    def _prepare_sdata(self, path):
-        path_zarr = path + "data.zarr" 
-        if not os.path.exists(path_zarr):
-            sdata = xenium(path=path, n_jobs=n_cores)
-            print("Saving zarr ...")
-            sdata.write(path_zarr) 
+    def _prepare_sdata(self):
+        path_zarr = self.directory + "dataset/" + self.stem_directory + "data.zarr"
+        if os.path.exists(path_zarr):
+            print(f"Loading the {path_zarr} ...", end=' ')
+            sdata = sd.SpatialData.read(path_zarr)
             print('done.')
         else:
-            print("Loading the zarr ...", end=' ')
-            sdata = sd.SpatialData.read(path_zarr)
+            path = self.raw_directory + self.stem_directory
+            sdata = xenium(path=path, n_jobs=n_cores)
+            print(f"Saving {path_zarr} ...")
+            sdat.write(path_zarr) 
             print('done.')
         return sdata
 
@@ -172,8 +174,6 @@ class Preprocessing():
         print("Filtering rectangular cell regions ... ", end='')
         self.images = {}
         window = int(np.ceil(self.upper / self.pixel_size))
-        io.logger_setup()
-        model = models.CellposeModel(gpu=True)
 
         for bound in tqdm(bounds.itertuples(), total=len(bounds)):
             cell_id = bound.Index
@@ -183,13 +183,9 @@ class Preprocessing():
             y_start = cy - window//2
             x_end = cx + window//2 + 1
             y_end = cy + window//2 + 1
-            if x_start < 0 or y_start < 0 or self.image_width <= x_end or self.image_height <= y_end:
+            if x_start < 0 or y_start < 0 or self.he_image_array.shape[2] <= x_end or self.he_image_array.shape[1] <= y_end:
                 continue
             window_image = self.he_image_array[:, y_start:y_end, x_start:x_end].astype(np.float32)
-#            try:
-#                model.eval(window_image)
-#            except:
-#                continue
             self.images[cell_id] = {
                 'window_image': window_image,
                 'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)), #without inverse affine transform
@@ -198,15 +194,13 @@ class Preprocessing():
         self.image_ids = list(self.images.keys())
         print(len(self.image_ids))
 
-        print("Save the images ...")
         images_directory = os.path.join(self.processing_directory, 'images/')
         os.makedirs(images_directory, exist_ok=True)
-        images_file = images_directory + f"images.npz"
+        images_file = images_directory + f"images.pkl"
         if not os.path.exists(images_file):
-            np.savez_compressed(
-                os.path.join(images_file),
-                **self.images,
-            )
+            print("Save the images ...", end=' ')
+            joblib.dump(self.images, os.path.join(images_file), compress=0)
+            print("done.")
 
     def annotation(self):
         he_annotation_file = self.processing_directory + f"annotation/he_annotation.csv"

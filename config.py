@@ -12,7 +12,6 @@ n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
 generator = torch.Generator().manual_seed(seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-gene_panel = pd.read_csv('/data0/Xenium_Prime/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name']
 
 def set_seed(seed=seed):
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -88,7 +87,6 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             "pericyte",
         ], 
         'Plasma_cell': [
-#            "plasmablast", #not the plasma cell
         ], 
         'Lymphocyte': [
             "memory B cell", 
@@ -129,17 +127,7 @@ cell_subtype = {
 
 class Config:
     def __init__(self, args):
-        self.stem_directory = f"{args.platform}/{args.source}/{args.sample}/"
-        self.stem_file = f"{args.platform}_{args.source}_{args.sample}"
-
-        if any(term in args.sample.lower() for term in ['lung', 'luad', 'nsclc']):
-            self.organ = 'lung'
-        if any(term in args.sample.lower() for term in ['breast', 'brca']):
-            self.organ = 'breast'
-        if any(term in args.sample.lower() for term in ['skin', 'skcm']):
-            self.organ = 'skin'
-        else:
-            self.organ = args.organ.lower()
+        self.organ = args.organ.lower()
 
         self.cell_types = next((cell_type_values for organ, cell_type_values in cell_types.items() if organ == self.organ), {}) #for the organ
         self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ
@@ -164,5 +152,7 @@ class Config:
         self.label_encoder.classes_ = np.array(parameters)
         self.classes = self.label_encoder.classes_ #for classification
         print('The classes are:', self.classes)
+
+        self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name'].values
 
         pprint(self.__dict__)
