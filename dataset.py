@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, WeightedRandomSampler
 
 import matplotlib.pyplot as plt
 
@@ -66,6 +66,63 @@ from preprocess import Preprocessing
 #        total = len(self)
 #        return DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
 
+class Infer():
+    def __init__(self, images, batch_size):
+        self.images = images
+        self.cell_ids = list(images.keys())
+        print(len(self.cell_ids), "images of the cells are prepared.")
+        self.batch_size = batch_size
+
+    def __len__(self):
+        return len(self.cell_ids)
+
+    def _resize(self, image, size):
+        return F.interpolate(image.unsqueeze(0), size=size, mode="bilinear", align_corners=False).squeeze()
+
+    def _weight(self, steps):
+        coords = torch.linspace(-1, 1, steps=steps)
+        weight = ((coords[:, None]**2 + coords[None, :]**2 - 2) / 2)**2
+        return weight
+
+    def __getitem__(self, i):
+        cell_id = self.cell_ids[i]
+        image_dict = self.images[cell_id]
+        window_image = torch.from_numpy(image_dict['window_image'].copy().transpose(2, 1, 0))
+        center = window_image.shape[1] // 2
+        nucleus = image_dict['nucleus']
+        nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
+
+        length = 224
+        half = length // 2
+
+        weight = self._weight(half).to(window_image.device).unsqueeze(0)
+
+        image_top_left = self._resize(window_image, half)
+        image_top_right = image_top_left * weight
+        image_bottom_left = self._resize(nucleus_image, half)
+        image_bottom_right = image_bottom_left * weight
+
+        image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
+        image[:, :half, :half] = image_top_left
+        image[:, :half, half:] = image_top_right
+        image[:, half:, :half] = image_bottom_left
+        image[:, half:, half:] = image_bottom_right
+
+        if isinstance(image, torch.Tensor):
+            image = image.float().div(255)
+        else:
+            image = transforms.ToTensor()(image)
+        image = transforms.Normalize(
+            mean=(0.707223, 0.578729, 0.703617),
+            std=(0.211883, 0.230117, 0.177517)
+        )(image)
+
+        return cell_id, image
+
+    def loader(self):
+        total = len(self)
+        return DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+
 class Dataset():
     def __init__(self, args, config, source, sample):
         self.directory = args.directory
@@ -89,6 +146,7 @@ class Dataset():
         print('Expression profile and their cell types loading ... ', end='')
         self.adata_raw = preprocessed.adata
         print(self.adata_raw.shape)
+        self.columns = self.adata_raw.obs.columns
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
         print(len(type_ids), "of annotated cells are loaded.")
 
@@ -171,7 +229,6 @@ class Dataset():
         return cell_id, image, expression, label
 
     def draw_umaps_expression(self):
-        cell_types = self.adata_raw.obs.columns
         fig, ax = plt.subplots(
             nrows=4,
             ncols=4,
@@ -184,8 +241,8 @@ class Dataset():
         ax[0][1].axis('off')
         ax[1][1].axis('off')
         indices = {'expression':0, 'morphology':1, 'annotation':2}
-        for cell_type in cell_types:
-            if 'subtype' in cell_type:
+        for column in self.columns:
+            if 'subtype' in column:
                 reindex = self.cell_subtypes
                 palette = self.palette_subtype
                 i = 0
@@ -193,8 +250,8 @@ class Dataset():
                 reindex = self.cell_types.keys()
                 palette = self.palette_type
                 i = 2
-            j = next((index for string, index in indices.items() if string in cell_type), 3)
-            counts = pd.DataFrame(self.adata_raw.obs.groupby(cell_type, observed=False).apply(len, include_groups=False), columns=['']).reindex(reindex).T
+            j = next((index for string, index in indices.items() if string in column), 3)
+            counts = pd.DataFrame(self.adata_raw.obs.groupby(column, observed=False).apply(len, include_groups=False), columns=['']).reindex(reindex).T
             ax[i][j] = sns.barplot(
                counts,
                orient = 'h',
@@ -205,10 +262,18 @@ class Dataset():
             ax[i][j].set_title(f"n={counts.sum(axis=1).values[0]}")
             for container in ax[i][j].containers:
                 ax[i][j].bar_label(container)
-            sc.pl.umap(self.adata_raw, color=cell_type, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None, size=1)
+            sc.pl.umap(self.adata_raw, color=column, palette=palette, ax=ax[i+1][j], show=False, legend_loc=None, size=1)
         fig.tight_layout()
         fig.savefig(self.directory + f"results/umaps_expression_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
+
+    def _sampler(self, dataset):
+        indices = np.array(dataset.indices)
+        labels = self.labels[indices].tolist()
+        unique_labels, counts = np.unique(labels, return_counts=True)
+        weights_per_class = {label: 1.0 / count for label, count in zip(unique_labels, counts)}
+        sample_weights = np.array([weights_per_class[label] for label in labels])
+        return WeightedRandomSampler(sample_weights, num_samples=len(dataset), replacement=True)
 
     def loader(self, split=0.8):
         total = len(self)
@@ -218,10 +283,10 @@ class Dataset():
         else:
             train_size = int(split * total)
             test_size = total - train_size
-            train_dataset, test_dateset = random_split(self, [train_size, test_size], generator=generator)
-            print(f"Train size: {len(train_dataset)}, Test size: {len(test_dateset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            test_loader = DataLoader(test_dateset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+            train_dataset, test_dataset = random_split(self, [train_size, test_size], generator=generator)
+            print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, sampler=self._sampler(train_dataset), shuffle=False, pin_memory=True)
+            test_loader = DataLoader(test_dataset, batch_size=self.batch_size, sampler=self._sampler(test_dataset), shuffle=False, pin_memory=True)
             return train_loader, test_loader
 
 class MergedDataset(Dataset):
@@ -232,7 +297,8 @@ class MergedDataset(Dataset):
         labels = []
         genes = []
         stem_file = args.platform
-        for source, sample in zip(args.sources, args.samples):
+        columns = []
+        for source, sample in zip(args.sources, args.samples, strict=True):
             dataset = Dataset(args, config, source, sample)
             cell_ids.extend(dataset.cell_ids)
             images.extend(dataset.images)
@@ -242,15 +308,16 @@ class MergedDataset(Dataset):
                 if gene not in genes:
                     genes.append(gene)
             stem_file += f"_{source}_{sample}"
+            columns.extend(dataset.columns)
 
         images = torch.stack(images)
         expressions = torch.stack(expressions)
         labels = torch.stack(labels)
 
         print('cell_ids:', len(cell_ids))
-        print('images:', images.shape, type(images))
-        print('expressions:', expressions.shape, type(expressions))
-        print('labels:', labels.shape, type(labels))
+        print('images:', images.shape)
+        print('expressions:', expressions.shape)
+        print('labels:', labels.shape)
         print('genes:', len(genes))
         print('stem_file:', stem_file)
 
@@ -260,6 +327,7 @@ class MergedDataset(Dataset):
         self.labels = labels
         self.genes = genes
         self.stem_file = stem_file
+        self.columns = columns
 
         self.batch_size = args.batch_size
 

@@ -146,9 +146,8 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
         return -torch.mean(zinb_log_likelihood)
 
 class Modeling():
-    def __init__(self, args, config, dataset=None, stem_file=None):
+    def __init__(self, args, config, dataset=None):
         self.directory = args.directory
-        self.stem_file = stem_file
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.palette_type = config.palette_type
@@ -161,8 +160,11 @@ class Modeling():
 
             self.genes = dataset.genes
             self.n_genes = len(self.genes)
+
+            self.stem_file = dataset.stem_file
         else:
             self.n_genes = 5001
+            self.stem_file = None
             
         self.label_encoder = config.label_encoder
         self.classes = config.classes

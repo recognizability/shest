@@ -14,8 +14,8 @@ if __name__ == "__main__":
     parser.add_argument("--raw_directory", type=str, default="/data0/", help="Directory of raw data")
     parser.add_argument("--directory", type=str, default="/data0/crp/", help="Working directory ")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
-    parser.add_argument("--sources", type=str, nargs="+", default=["10X", "SMC"], help="Data sources")
-    parser.add_argument("--samples", type=str, nargs="+", default=["Human_Lung_Cancer", "LUAD_SMC_01"], help="Sample names")
+    parser.add_argument("--sources", type=str, nargs="+", default=["10X"], help="Data sources")
+    parser.add_argument("--samples", type=str, nargs="+", default=["Human_Lung_Cancer"], help="Sample names")
     parser.add_argument("--organ", type=str, default="lung", help="Organ of the sample")
     parser.add_argument("--filter", action="store_true", help="Force filtration by the cell area")
     parser.add_argument("--original_image", action="store_true", help="Use the original imagem not the quadruple tiles")
@@ -29,7 +29,6 @@ if __name__ == "__main__":
     print(args)
 
     config = Config(args)
-
     merged_dataset = MergedDataset(args, config)
 
     modeling = Modeling(args, config, merged_dataset)
@@ -37,4 +36,4 @@ if __name__ == "__main__":
     modeling.draw_confusion_matrix()
     if not 'subtype' in args.cell_type:
         modeling.draw_heatmap()
-        modeling.draw_umaps_embedding()
+#        modeling.draw_umaps_embedding()

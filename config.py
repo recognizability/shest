@@ -36,8 +36,6 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Tumor cells LUAD MSLN',
             'Tumor cells LUAD NE',
             'Tumor cells LUAD mitotic',
-            'Alveolar cell type 2',
-            'Macrophage alveolar',
         ],
         "Macrophage": [
             "Macrophage",
@@ -55,10 +53,8 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Smooth muscle cell',
             'Pericyte',
         ],
-        'Plasma_cell': [
-            'Plasma cell',
-        ],
         'Lymphocyte': [
+            'Plasma cell',
             'B cell',
             'T cell regulatory',
             'T cell CD4',
@@ -67,7 +63,7 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'T cell CD8 naive',
             'T cell CD8 terminally exhausted',
             'T cell NK-like',
-            'NK cell', # not B or T
+            'NK cell',
         ],
     },
     'breast': {
@@ -85,8 +81,6 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
         'Stromal_cell': [
             "fibroblast of breast",
             "pericyte",
-        ], 
-        'Plasma_cell': [
         ], 
         'Lymphocyte': [
             "memory B cell", 
@@ -110,8 +104,6 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
         'Stromal_cell':[
             'fibroblast',
         ],
-        'Plasma_cell': [
-        ],
         'Lymphocyte':[
             'B cell',
             'T cell',
@@ -133,7 +125,7 @@ class Config:
         self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-        palette = 'nipy_spectral_r'
+        palette = 'blend:red,orange,yellow,green,blue'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
             sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()
@@ -153,6 +145,9 @@ class Config:
         self.classes = self.label_encoder.classes_ #for classification
         print('The classes are:', self.classes)
 
-        self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name'].values
+        if args.platform == "Xenium_Prime":
+            self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name'].values
+        elif args.platform == "Xenium":
+            self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/Xenium_hMulti_v1_metadata_annotations.csv')['Gene'].values
 
         pprint(self.__dict__)
