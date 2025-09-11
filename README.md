@@ -11,9 +11,10 @@
 ## Execution
 
 ```
-usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM] [--source SOURCE]
-               [--sample SAMPLE] [--filter] [--cell_type CELL_TYPE] [--sc_annotate] [--batch_size BATCH_SIZE]
-               [--epochs EPOCHS] [--lr LR] [--train]
+usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM]
+               [--sources SOURCES [SOURCES ...]] [--samples SAMPLES [SAMPLES ...]] [--organ ORGAN]
+               [--cell_type CELL_TYPE] [--sc_annotate] [--batch_size BATCH_SIZE] [--epochs EPOCHS]
+               [--lr LR] [--mode MODE]
 
 Sample information and hyperparameters
 
@@ -24,9 +25,11 @@ options:
   --directory DIRECTORY
                         Working directory (default: /data0/crp/)
   --platform PLATFORM   Platform of spatial transcriptomics (default: Xenium_Prime)
-  --source SOURCE       Data source (default: 10X)
-  --sample SAMPLE       Sample name (default: Human_Lung_Cancer)
-  --filter              Force filtration by the cell area (default: False)
+  --sources SOURCES [SOURCES ...]
+                        Data sources (default: ['10X'])
+  --samples SAMPLES [SAMPLES ...]
+                        Sample names (default: ['Human_Lung_Cancer'])
+  --organ ORGAN         Organ of the sample (default: lung)
   --cell_type CELL_TYPE
                         Cell type to consider (default: cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)
@@ -34,5 +37,5 @@ options:
                         Batch size of data loader (default: 256)
   --epochs EPOCHS       Number of epochs in training (default: 40)
   --lr LR               Learning rate of optimizer (default: 0.01)
-  --train               Force training the model (default: False)
+  --mode MODE           train, test or infer (default: test)
 ```

@@ -46,7 +46,6 @@ class Preprocessing():
         self.pixel_size = json.load(open(self.raw_directory + self.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
         self.lower = 3 #micrometers
         self.upper = 18 #micrometers
-        self.filter = args.filter
 
         self.sdata = self._prepare_sdata()
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
@@ -80,7 +79,7 @@ class Preprocessing():
             path = self.raw_directory + self.stem_directory
             sdata = xenium(path=path, n_jobs=n_cores)
             print(f"Saving {path_zarr} ...")
-            sdat.write(path_zarr) 
+            sdata.write(path_zarr) 
             print('done.')
         return sdata
 

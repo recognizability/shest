@@ -146,7 +146,7 @@ class ZeroInflatedNegativeBinomialLoss(nn.Module):
         return -torch.mean(zinb_log_likelihood)
 
 class Modeling():
-    def __init__(self, args, config, dataset=None):
+    def __init__(self, args, config, dataset):
         self.directory = args.directory
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
@@ -154,17 +154,18 @@ class Modeling():
         self.palette_subtype = config.palette_subtype
         self.palette = self.palette_subtype if self.cell_type == 'cell_subtype_expression' else self.palette_type
 
-        if dataset is not None or args.mode == 'train' or args.mode == 'test':
-#            dataset.draw_umaps_expression()
+        self.gene_panel = config.gene_panel
+
+#        if args.mode == 'infer':
+#            self.n_genes = len(self.gene_panel)
+#        else:
+        if args.mode == 'train' or args.mode == 'test':
             self.train_loader, self.test_loader = dataset.loader()
 
-            self.genes = dataset.genes
-            self.n_genes = len(self.genes)
+        self.genes = dataset.genes
+        self.n_genes = len(self.genes)
 
-            self.stem_file = dataset.stem_file
-        else:
-            self.n_genes = 5001
-            self.stem_file = None
+        self.stem_file = dataset.stem_file
             
         self.label_encoder = config.label_encoder
         self.classes = config.classes
@@ -187,12 +188,9 @@ class Modeling():
         self.labels = None
         self.predictions = None
 
-        self.gene_panel = config.gene_panel
-
         self.load()
 
     def load(self):
-        model_file = self.directory + f"models/model_{self.stem_file}_{self.cell_type}.pth"
         weights_file = self.directory + f"models/weights_{self.stem_file}_{self.cell_type}.pth"
         if not os.path.isfile(weights_file) or self.mode=='train':
             optimizer = torch.optim.AdamW(
@@ -282,13 +280,12 @@ class Modeling():
 
             if not escape:
                 torch.save(self.model.state_dict(), weights_file)
-                torch.save(self.model, model_file)
 
             gc.collect()
             torch.cuda.empty_cache()
 
         else: 
-            print(f"Loading weights from {model_file} ...")
+            print(f"Loading weights from {weights_file} ...")
             self.model.load_state_dict(torch.load(weights_file, map_location=device))
 
     def evaluate(self, test_loader=None):
@@ -355,45 +352,6 @@ class Modeling():
         
         gc.collect()
         torch.cuda.empty_cache()
-
-    def draw_umaps_embedding(self):
-        print("Standardizing ... ", end='')
-        images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled = thread_map(
-            lambda x: StandardScaler().fit_transform(x), 
-            [self.images, self.embeddings, self.expressions, self.reconstructions],
-            max_workers=n_cores,
-        )
-        print(images_scaled.shape, embeddings_scaled.shape, expressions_scaled.shape, reconstructions_scaled.shape)
-
-        print("2D umapping ... ", end='')
-        image_umap, embedding_umap, expression_umap, reconstruction_umap = map(
-            lambda x: UMAP(n_components=2, n_jobs=n_cores, low_memory=True, random_state=seed).fit_transform(x),
-            [images_scaled, embeddings_scaled, expressions_scaled, reconstructions_scaled]
-        )
-        print(image_umap.shape, embedding_umap.shape, expression_umap.shape, reconstruction_umap.shape)
-
-        umaps = {
-            'H&E images': image_umap, 
-            'embeddings': embedding_umap,
-            'gene expressions': expression_umap, 
-            'reconstructions': reconstruction_umap, 
-        }
-
-        fig, ax = plt.subplots(1, len(umaps), figsize=(13, 3))
-        colors = [self.palette[cell_type] for cell_type in self.labels]
-        
-        for i, (title, coordinate) in enumerate(umaps.items()):
-            ax[i].scatter(coordinate[:, 0], coordinate[:, 1], c=colors, s=1)
-            ax[i].set_title(f"UMAP of {title}")
-            ax[i].set_xticks([])
-            ax[i].set_yticks([])
-        
-        markers = [plt.Line2D([0,0],[0,0], color=color, marker='o', linestyle='') for color in self.palette.values()]
-        plt.legend(markers, self.palette.keys(), numpoints=1, bbox_to_anchor=(1.05, 1), loc='upper left')
-        
-        fig.tight_layout()
-        fig.savefig(self.directory + f"results/umaps_embedding_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
-        plt.close()
 
     def draw_heatmap(self):
         adata_actual = anndata.AnnData(
