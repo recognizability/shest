@@ -149,5 +149,3 @@ class Config:
             self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv')['gene_name'].values
         elif args.platform == "Xenium":
             self.gene_panel = pd.read_csv(args.raw_directory + args.platform + '/Xenium_hMulti_v1_metadata_annotations.csv')['Gene'].values
-
-#        pprint(self.__dict__)

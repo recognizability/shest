@@ -35,7 +35,7 @@ class Quadruple():
         weight = self._weight(half).unsqueeze(0)
         images = []
         print("Image processing ... ", end='')
-        for cell_id in self.cell_ids:
+        for cell_id in tqdm(self.cell_ids):
             image_dict = self.images_raw[cell_id]
             window_image = torch.from_numpy(image_dict['window_image'])
             center = window_image.shape[1] // 2
@@ -68,12 +68,16 @@ class Quadruple():
         return cell_id, image
 
 class Infer(Quadruple):
-    def __init__(self, images):
+    def __init__(self, args, images):
         super().__init__(images)
+        self.batch_size = args.batch_size
+        self.stem_file = args.platform
+        for source, sample in zip(args.sources, args.samples, strict=True):
+            self.stem_file += f"_{source}_{sample}"
 
-    def loader(self, batch_size):
+    def loader(self):
         total = len(self)
-        return DataLoader(self, batch_size=batch_size, shuffle=False, pin_memory=True)
+        return DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
 
 class Load(Quadruple):
     def __init__(self, args, config, source, sample):
@@ -171,7 +175,6 @@ class Dataset():
         angles = [0, 90, 180, 270]
         flips = [None, "h", "v", "hv"]
         rng = np.random.default_rng(seed)
-        class_counts = Counter()
         augmented_images = []
         augmented_expressions = []
         augmented_labels = []
@@ -201,10 +204,8 @@ class Dataset():
                 augmented_expressions.append(expression.unsqueeze(0))
                 augmented_labels.append(label.unsqueeze(0))
                 augmented_cell_ids.append(cell_id)
-                class_counts[c] += 1
 
-        print("Augmented classes:", dict(class_counts))
-        print("Augmented labels:", dict(Counter([int(label) for label in augmented_labels])))
+        print("augmented_labels:", dict(Counter([int(label) for label in augmented_labels])))
 
         self.images = torch.cat(augmented_images, dim=0).contiguous()
         self.expressions = torch.cat(augmented_expressions, dim=0).contiguous()

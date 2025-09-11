@@ -156,14 +156,13 @@ class Modeling():
 
         self.gene_panel = config.gene_panel
 
-#        if args.mode == 'infer':
-#            self.n_genes = len(self.gene_panel)
-#        else:
-        if args.mode == 'train' or args.mode == 'test':
+        if args.mode == 'infer':
+            self.inference_loader = dataset.loader()
+            self.n_genes = len(self.gene_panel)
+        else:
             self.train_loader, self.test_loader = dataset.loader()
-
-        self.genes = dataset.genes
-        self.n_genes = len(self.genes)
+            self.genes = dataset.genes
+            self.n_genes = len(self.genes)
 
         self.stem_file = dataset.stem_file
             
@@ -443,7 +442,9 @@ class Modeling():
         plt.savefig(self.directory + f"results/confusion_matrix_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
         plt.close()
 
-    def infer(self, inference_loader):
+    def infer(self, inference_loader=None):
+        if inference_loader is None:
+            inference_loader = self.inference_loader
         self.model.eval()
         cell_ids = []
         predictions = []
