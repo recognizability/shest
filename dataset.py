@@ -37,7 +37,7 @@ class Quadruple():
         print("Image processing ... ", end='')
         for cell_id in tqdm(self.cell_ids):
             image_dict = self.images_raw[cell_id]
-            window_image = torch.from_numpy(image_dict['window_image'])
+            window_image = torch.from_numpy(image_dict['window_image']).float()
             center = window_image.shape[1] // 2
             nucleus = image_dict['nucleus']
             nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
@@ -47,7 +47,7 @@ class Quadruple():
             image_top_right = image_top_left * weight
             image_bottom_right = image_bottom_left * weight
 
-            image = torch.zeros(3, length, length, dtype=torch.uint8, device=window_image.device)
+            image = torch.zeros(3, length, length, dtype=torch.float32, device=window_image.device)
             image[:, :half, :half] = image_top_left
             image[:, :half, half:] = image_top_right
             image[:, half:, :half] = image_bottom_left
@@ -56,8 +56,8 @@ class Quadruple():
             images.append(image.unsqueeze(0))
 
         images = torch.cat(images, dim=0).contiguous() / 255.0
-        mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1)
-        std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1)
+        mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1) #from H-optimus-0
+        std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1) #from H-optimus-0
         images = (images - mean) / std
         print(len(images), "images are loaded.")
         return images
@@ -119,7 +119,7 @@ class Load(Quadruple):
         cell_indices = self.adata.obs_names.get_indexer(self.cell_ids)
         self.expressions = torch.from_numpy(self.adata.X[cell_indices].toarray()).float()
         self.labels_raw = self.adata.obs[self.cell_type].tolist()
-        self.labels =  torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy(dtype=np.int64))
+        self.labels = torch.from_numpy(self.adata.obs.iloc[cell_indices][self.cell_type_encoded].to_numpy()).long()
         self.classes = config.classes
 
     def __getitem__(self, i):

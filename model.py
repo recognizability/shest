@@ -34,7 +34,6 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 
 from config import n_cores, seed, set_seed, generator, device
-from preprocess import Preprocessing
 
 sc.settings.n_jobs = n_cores
 in_features = 1536 #output features of H-optimus-0
@@ -218,7 +217,7 @@ class Modeling():
                     label = label.to(device, non_blocking=True)
 
                     optimizer.zero_grad()
-                    with torch.autocast(device_type=device.type, dtype=torch.float16):
+                    with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                         embedding, mean, overdispersion, probability, logit = self.model(image)
 
                         loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
@@ -313,7 +312,7 @@ class Modeling():
                 expression = expression.to(device, non_blocking=True)
                 label = label.to(device, non_blocking=True)
 
-                with torch.autocast(device_type=device.type, dtype=torch.float16):
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     embedding, mean, overdispersion, probability, logit = self.model(image)
                     prediction = torch.argmax(logit, dim=1)
 
@@ -456,10 +455,10 @@ class Modeling():
                 image = image.to(device, non_blocking=True)
 
                 cell_ids.extend(cell_id)
-                with torch.autocast(device_type=device.type, dtype=torch.float16):
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     embedding, mean, overdispersion, probability, logit = self.model(image)
                 probability, prediction = torch.max(torch.softmax(logit, dim=1), dim=1)
-                prediction[probability < 0.9] = -1
+                prediction[probability < 0.99] = -1
                 predictions.append(prediction.detach().cpu())
                 expressions.append(mean.detach().cpu())
 

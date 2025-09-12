@@ -57,7 +57,7 @@ class Preprocessing():
         self.processing_directory = self.directory + 'dataset/' + self.stem_directory
         os.makedirs(self.processing_directory, exist_ok=True)
 
-        self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values #y, x, c
+        self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values.astype(np.float16) #y, x, c
         self.image_channels, self.image_height, self.image_width = self.he_image_array.shape
 
         self.annotated_cell_ids = None
@@ -163,8 +163,8 @@ class Preprocessing():
 
         centroids = self.nucleus_boundaries.centroid
         centroids_x, centroids_y = self._inverse_affine_transform(centroids.x / self.pixel_size, centroids.y / self.pixel_size)
-        bounds['centroid_x'] = np.round(centroids_x).astype(int)
-        bounds['centroid_y'] = np.round(centroids_y).astype(int)
+        bounds['centroid_x'] = np.round(centroids_x).astype(np.int32)
+        bounds['centroid_y'] = np.round(centroids_y).astype(np.int32)
         bounds = bounds.loc[
             (self.lower <= bounds['width']) & (bounds['width'] < self.upper) &
             (self.lower <= bounds['height']) & (bounds['height'] < self.upper)
@@ -184,7 +184,7 @@ class Preprocessing():
             y_end = cy + window//2 + 1
             if x_start < 0 or y_start < 0 or self.he_image_array.shape[2] <= x_end or self.he_image_array.shape[1] <= y_end:
                 continue
-            window_image = self.he_image_array[:, y_start:y_end, x_start:x_end].astype(np.float32)
+            window_image = self.he_image_array[:, y_start:y_end, x_start:x_end]
             self.images[cell_id] = {
                 'window_image': window_image,
                 'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)), #without inverse affine transform

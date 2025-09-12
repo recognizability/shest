@@ -1,4 +1,5 @@
 # SHEST
+Single-cell-level artificial Intelligence from hematoxylin and eosin morphology for spatial transcriptomics reconstruction and cell type prediction
 
 ## Prerequisites
 
