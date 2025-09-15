@@ -12,12 +12,13 @@ import spatialdata as sd
 from spatialdata.transformations import get_transformation
 import spatialdata_plot
 from spatialdata_io import xenium
-
-from skimage.measure import regionprops, find_contours
+import shapely
+import torch.nn.functional as F
+from skimage.draw import polygon2mask
+from skimage.color import rgb2hed, hed2rgb
 
 from tqdm import tqdm
 import joblib
-from joblib import Parallel, delayed
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -44,8 +45,8 @@ class Preprocessing():
 
         self.stem_directory = f"{args.platform}/{source}/{sample}/"
         self.pixel_size = json.load(open(self.raw_directory + self.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
-        self.lower = 3 #micrometers
-        self.upper = 18 #micrometers
+        self.lower = 2 #micrometers
+        self.upper = 16 #micrometers
 
         self.sdata = self._prepare_sdata()
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
@@ -57,8 +58,9 @@ class Preprocessing():
         self.processing_directory = self.directory + 'dataset/' + self.stem_directory
         os.makedirs(self.processing_directory, exist_ok=True)
 
-        self.he_image_array = self.sdata.images["he_image"]["scale0"]["image"].values.astype(np.float16) #y, x, c
-        self.image_channels, self.image_height, self.image_width = self.he_image_array.shape
+        self.he_image = self.sdata.images["he_image"]["scale0"]["image"].values
+        self.image_height, self.image_width = self.he_image.shape[1:]
+        self.save_image = args.save_image
 
         self.annotated_cell_ids = None
         self.image_ids = None
@@ -72,7 +74,7 @@ class Preprocessing():
     def _prepare_sdata(self):
         path_zarr = self.directory + "dataset/" + self.stem_directory + "data.zarr"
         if os.path.exists(path_zarr):
-            print(f"Loading the {path_zarr} ...", end=' ')
+            print("Loading the sdata ...", end=' ')
             sdata = sd.SpatialData.read(path_zarr)
             print('done.')
         else:
@@ -122,84 +124,103 @@ class Preprocessing():
             print('Making UMAPs for each cell ...')
             sc.tl.umap(self.adata, random_state=seed)
 
+            print("Saving the annotations ... ", end='')
             self.adata.write_h5ad(sc_annotation_h5ad)
+            print("done.")
         else: 
+            print("Loading the annotations ... ", end='')
             self.adata = sc.read_h5ad(sc_annotation_h5ad)
+            print("done.")
 
         self.adata.obs.index = self.adata.obs['cell_id']
         self.adata.obs = self.adata.obs.drop(columns='cell_id')
         inclusion = self.adata.obs[self.cell_subtype].isin(self.cell_subtypes)
         self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, self.cell_subtype]
-        self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes)
+        self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes, ordered=True)
         self.adata.obs['cell_type_expression'] = self.adata.obs[self.cell_subtype].map(self.subtype_to_type)
+        self.adata.obs['cell_type_expression'] = pd.Categorical(self.adata.obs['cell_type_expression'], categories=self.cell_types.keys(), ordered=True)
 
-    def _inverse_affine_transform(self, x_pixel, y_pixel):
-        x_pixel = np.atleast_1d(x_pixel)
-        y_pixel = np.atleast_1d(y_pixel)
-        pixel_coords = np.stack([x_pixel, y_pixel], axis=1)
-        ones = np.ones((pixel_coords.shape[0], 1))
-        three_dimension = np.hstack([pixel_coords, ones]).T
+    def _transform(self, polygon):
+        x, y = polygon.exterior.xy
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        x = x / self.pixel_size
+        y = y / self.pixel_size
+
+        coords = np.stack([x, y], axis=1)
+        ones = np.ones((coords.shape[0], 1))
+        three_dimension = np.hstack([coords, ones]).T
         inverse_affine = np.linalg.inv(self.affine)
         transformed = inverse_affine @ three_dimension
-        x_transformed, y_transformed = transformed[:2]
-        if x_transformed.size == 1:
-            return x_transformed[0], y_transformed[0]
-        else:
-            return x_transformed, y_transformed
+        x, y = transformed[:2]
+
+        coords = np.stack([x, y], axis=1)
+        return shapely.geometry.Polygon(coords).exterior
 
     def cell_filter(self):
-        bounds = self.nucleus_boundaries.bounds
-        bounds['width'] = bounds['maxx'] - bounds['minx']
-        bounds['height'] = bounds['maxy'] - bounds['miny']
-        bounds['cell_type_expression'] = self.adata.obs.loc[bounds.index, 'cell_type_expression']
-        bounds_melted = bounds.melt(id_vars='cell_type_expression', value_vars=['width', 'height'], var_name='Side', value_name='Length_(μm)')
-        fig, ax = plt.subplots(figsize=(4, 4))
-        sns.violinplot(data=bounds_melted, y='cell_type_expression', x='Length_(μm)', hue='Side', split=True, inner='quart', order=list(self.cell_types.keys()), ax=ax)
-        ax.axvline(self.upper, ls='--', c='gray')
-        ax.axvline(self.lower, ls='--', c='gray')
-        fig.tight_layout()
-        fig.savefig(f"{self.directory}results/violinplot_{self.stem_file}.png", bbox_inches="tight")
-        plt.close(fig)
-
-        centroids = self.nucleus_boundaries.centroid
-        centroids_x, centroids_y = self._inverse_affine_transform(centroids.x / self.pixel_size, centroids.y / self.pixel_size)
-        bounds['centroid_x'] = np.round(centroids_x).astype(np.int32)
-        bounds['centroid_y'] = np.round(centroids_y).astype(np.int32)
-        bounds = bounds.loc[
-            (self.lower <= bounds['width']) & (bounds['width'] < self.upper) &
-            (self.lower <= bounds['height']) & (bounds['height'] < self.upper)
-        ]
-
-        print("Filtering rectangular cell regions ... ", end='')
-        self.images = {}
-        window = int(np.ceil(self.upper / self.pixel_size))
-
-        for bound in tqdm(bounds.itertuples(), total=len(bounds)):
-            cell_id = bound.Index
-            cx = bound.centroid_x
-            cy = bound.centroid_y
-            x_start = cx - window//2
-            y_start = cy - window//2
-            x_end = cx + window//2 + 1
-            y_end = cy + window//2 + 1
-            if x_start < 0 or y_start < 0 or self.he_image_array.shape[2] <= x_end or self.he_image_array.shape[1] <= y_end:
-                continue
-            window_image = self.he_image_array[:, y_start:y_end, x_start:x_end]
-            self.images[cell_id] = {
-                'window_image': window_image,
-                'nucleus': int(np.ceil(max(bound.width, bound.height) / self.pixel_size)), #without inverse affine transform
-            }
-
-        self.image_ids = list(self.images.keys())
-        print(len(self.image_ids))
-
         images_directory = os.path.join(self.processing_directory, 'images/')
         os.makedirs(images_directory, exist_ok=True)
         images_file = images_directory + f"images.pkl"
-        if not os.path.exists(images_file):
-            print("Save the images ...", end=' ')
+        if not os.path.exists(images_file) or self.save_image:
+            side = 224
+            tile_size = side // 2
+            lower = int(round(self.lower/self.pixel_size))
+            upper = int(round(self.upper/self.pixel_size))
+            half = upper // 2
+            exteriors = self.nucleus_boundaries.geometry.apply(lambda polygon: self._transform(polygon))
+            self.images = {}
+            print("Filtering and preparing cell images ...")
+            for cell_id, polygon in tqdm(exteriors.items(), total=len(exteriors)):
+                x, y = polygon.xy
+                if np.min(x) < 0 or np.max(x) >= self.image_width or np.min(y) < 0 or np.max(y) >= self.image_height:
+                    continue
+                nucleus = max(np.max(y) - np.min(y), np.max(x) - np.min(x))
+                nucleus = int(round(tile_size*nucleus/upper))
+                if nucleus < lower or nucleus >= upper:
+                    continue
+                x_centroid = int(round(polygon.centroid.x))
+                y_centroid = int(round(polygon.centroid.y))
+                y_lower = y_centroid - half
+                y_upper = y_centroid + half
+                x_left = x_centroid - half
+                x_right = x_centroid + half
+                if y_lower < 0 or y_upper >= self.image_height or x_left < 0 or x_right >= self.image_width:
+                    continue
+
+                window_image = self.he_image[:, y_lower:y_upper, x_left:x_right].copy()
+                window_image = torch.from_numpy(window_image).float()
+                window_image = F.interpolate(window_image.unsqueeze(0), size=tile_size, mode="bilinear", align_corners=False).squeeze(0)
+
+                polygon_shifted = [(
+                    int(round(tile_size*(y - y_lower)/upper)),
+                    int(round(tile_size*(x - x_left)/upper)),
+                ) for x, y in polygon.coords]
+                mask = polygon2mask(window_image.shape[1:], polygon_shifted)
+                mask = torch.from_numpy(mask).unsqueeze(0).float()
+                window_image_masked = window_image*mask
+
+                center = window_image.shape[1] // 2
+                nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
+                nucleus_image = F.interpolate(nucleus_image.unsqueeze(0), size=tile_size, mode="bilinear", align_corners=False).squeeze(0)
+                nucleus_image_masked = window_image_masked[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
+                nucleus_image_masked = F.interpolate(nucleus_image_masked.unsqueeze(0), size=tile_size, mode="bilinear", align_corners=False).squeeze(0)
+
+                self.images[cell_id] = torch.cat([
+                    torch.cat([window_image, window_image_masked], dim=2),
+                    torch.cat([nucleus_image, nucleus_image_masked], dim=2)
+                ], dim=1)
+
+            print("Saving the images ...", end=' ')
             joblib.dump(self.images, os.path.join(images_file), compress=0)
             print("done.")
+        else:
+            print("Loading the images ...", end=' ')
+            with open(file=os.path.join(images_file), mode='rb') as f:
+                self.images = joblib.load(f)
+            print("done.")
+
+        self.image_ids = list(self.images.keys())
+        print(len(self.image_ids), "images are prepared.")
 
     def annotation(self):
         he_annotation_file = self.processing_directory + f"annotation/he_annotation.csv"

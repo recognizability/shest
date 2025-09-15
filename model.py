@@ -458,7 +458,9 @@ class Modeling():
                 with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
                     embedding, mean, overdispersion, probability, logit = self.model(image)
                 probability, prediction = torch.max(torch.softmax(logit, dim=1), dim=1)
-                prediction[probability < 0.99] = -1
+#                prediction[probability < 0.99] = -1
+#                prediction[probability < 0.9] = -1
+                prediction[probability < 0.0] = -1
                 predictions.append(prediction.detach().cpu())
                 expressions.append(mean.detach().cpu())
 

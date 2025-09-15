@@ -1,5 +1,4 @@
 import numpy as np
-from collections import Counter
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
@@ -14,9 +13,9 @@ from preprocess import Preprocessing
 class Quadruple():
     def __init__(self, images, cell_ids=None):
         self.images_raw = images
+        self.images = self._image_load()
         self.cell_ids = list(images.keys()) if cell_ids is None else cell_ids
         print(len(self.cell_ids), "images of the cells are prepared.")
-        self.images = self._image_load()
 
     def __len__(self):
         return len(self.cell_ids)
@@ -30,31 +29,11 @@ class Quadruple():
         return weight
 
     def _image_load(self):
-        length = 224
-        half = length // 2
-        weight = self._weight(half).unsqueeze(0)
         images = []
-        print("Image processing ... ", end='')
+        print("Image loading ...")
         for cell_id in tqdm(self.cell_ids):
-            image_dict = self.images_raw[cell_id]
-            window_image = torch.from_numpy(image_dict['window_image']).float()
-            center = window_image.shape[1] // 2
-            nucleus = image_dict['nucleus']
-            nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
-
-            image_top_left = self._resize(window_image, half)
-            image_bottom_left = self._resize(nucleus_image, half)
-            image_top_right = image_top_left * weight
-            image_bottom_right = image_bottom_left * weight
-
-            image = torch.zeros(3, length, length, dtype=torch.float32, device=window_image.device)
-            image[:, :half, :half] = image_top_left
-            image[:, :half, half:] = image_top_right
-            image[:, half:, :half] = image_bottom_left
-            image[:, half:, half:] = image_bottom_right
-
+            image = self.images_raw[cell_id]
             images.append(image.unsqueeze(0))
-
         images = torch.cat(images, dim=0).contiguous() / 255.0
         mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1) #from H-optimus-0
         std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1) #from H-optimus-0
@@ -154,63 +133,62 @@ class Dataset():
             stem_file += f"_{source}_{sample}"
             columns.extend(loaded.columns)
 
-        print('cell_ids:', len(cell_ids))
-        print('stem_file:', stem_file)
-
-        images = torch.cat(images, dim=0).contiguous()
-        expressions = torch.cat(expressions, dim=0).contiguous()
-        labels = torch.cat(labels, dim=0).contiguous()
-        print("labels:", dict(Counter([int(label) for label in labels])))
+        self.images = torch.cat(images, dim=0).contiguous()
+        self.expressions = torch.cat(expressions, dim=0).contiguous()
+        self.labels = torch.cat(labels, dim=0).contiguous()
 
         self.cell_ids = cell_ids
         self.genes = genes
         self.stem_file = stem_file
         self.columns = columns
+        print('cell_ids:', len(self.cell_ids))
+        print('stem_file:', self.stem_file)
+
 
         self.batch_size = args.batch_size
 
         class_indices = {c: [i for i, label in enumerate(labels_raw) if label == c] for c in self.classes}
         print("classes:", {c:len(indices) for c, indices in class_indices.items()})
-        max_count = max(len(indices) for indices in class_indices.values())
-        angles = [0, 90, 180, 270]
-        flips = [None, "h", "v", "hv"]
-        rng = np.random.default_rng(seed)
-        augmented_images = []
-        augmented_expressions = []
-        augmented_labels = []
-        augmented_cell_ids = []
+#        max_count = max(len(indices) for indices in class_indices.values())
+#        angles = [0, 90, 180, 270]
+#        flips = [None, "h", "v", "hv"]
+#        rng = np.random.default_rng(seed)
+#        augmented_images = []
+#        augmented_expressions = []
+#        augmented_labels = []
+#        augmented_cell_ids = []
 
-        print("Augmentating the dataset ...")
-        for c, indices in tqdm(class_indices.items()):
-            repeat = max_count // len(indices)
-            remain = max_count % len(indices)
-            expanded_indices = indices * repeat + indices[:remain]
-            for i in expanded_indices:
-                angle = int(rng.choice(angles))
-                flip = str(rng.choice(flips))
-                image = images[i]
-                expression = expressions[i]
-                label = labels[i]
-                cell_id = cell_ids[i]
-                if angle != 0:
-                    image = transforms.functional.rotate(image, angle)
-                if flip == "h":
-                    image = transforms.functional.hflip(image)
-                elif flip == "v":
-                    image = transforms.functional.vflip(image)
-                elif flip == "hv":
-                    image = transforms.functional.hflip(transforms.functional.vflip(image))
-                augmented_images.append(image.unsqueeze(0))
-                augmented_expressions.append(expression.unsqueeze(0))
-                augmented_labels.append(label.unsqueeze(0))
-                augmented_cell_ids.append(cell_id)
+#        print("Augmentating the dataset ...")
+#        for c, indices in tqdm(class_indices.items()):
+#            repeat = max_count // len(indices)
+#            remain = max_count % len(indices)
+#            expanded_indices = indices * repeat + indices[:remain]
+#            for i in expanded_indices:
+#                angle = int(rng.choice(angles))
+#                flip = str(rng.choice(flips))
+#                image = images[i]
+#                expression = expressions[i]
+#                label = labels[i]
+#                cell_id = cell_ids[i]
+#                if angle != 0:
+#                    image = transforms.functional.rotate(image, angle)
+#                if flip == "h":
+#                    image = transforms.functional.hflip(image)
+#                elif flip == "v":
+#                    image = transforms.functional.vflip(image)
+#                elif flip == "hv":
+#                    image = transforms.functional.hflip(transforms.functional.vflip(image))
+#                augmented_images.append(image.unsqueeze(0))
+#                augmented_expressions.append(expression.unsqueeze(0))
+#                augmented_labels.append(label.unsqueeze(0))
+#                augmented_cell_ids.append(cell_id)
+#
+#        print("augmented_labels:", dict(Counter([int(label) for label in augmented_labels])))
 
-        print("augmented_labels:", dict(Counter([int(label) for label in augmented_labels])))
-
-        self.images = torch.cat(augmented_images, dim=0).contiguous()
-        self.expressions = torch.cat(augmented_expressions, dim=0).contiguous()
-        self.labels = torch.cat(augmented_labels, dim=0).contiguous()
-        self.cell_ids = augmented_cell_ids
+#        self.images = torch.cat(augmented_images, dim=0).contiguous()
+#        self.expressions = torch.cat(augmented_expressions, dim=0).contiguous()
+#        self.labels = torch.cat(augmented_labels, dim=0).contiguous()
+#        self.cell_ids = augmented_cell_ids
 
     def __len__(self):
         return len(self.cell_ids)
