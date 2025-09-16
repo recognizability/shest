@@ -14,8 +14,8 @@ Single-cell-level artificial Intelligence from hematoxylin and eosin morphology 
 ```
 usage: main.py [-h] [--raw_directory RAW_DIRECTORY] [--directory DIRECTORY] [--platform PLATFORM]
                [--sources SOURCES [SOURCES ...]] [--samples SAMPLES [SAMPLES ...]] [--organ ORGAN]
-               [--cell_type CELL_TYPE] [--sc_annotate] [--batch_size BATCH_SIZE] [--epochs EPOCHS]
-               [--lr LR] [--mode MODE]
+               [--cell_type CELL_TYPE] [--sc_annotate] [--save_image] [--batch_size BATCH_SIZE]
+               [--not_augment] [--epochs EPOCHS] [--lr LR] [--mode MODE]
 
 Sample information and hyperparameters
 
@@ -34,8 +34,10 @@ options:
   --cell_type CELL_TYPE
                         Cell type to consider (default: cell_type)
   --sc_annotate         Force annotation on the cells with a single cell reference (default: False)
+  --save_image          Force saving images (default: False)
   --batch_size BATCH_SIZE
                         Batch size of data loader (default: 256)
+  --not_augment         Do not augment for class balancing (default: False)
   --epochs EPOCHS       Number of epochs in training (default: 40)
   --lr LR               Learning rate of optimizer (default: 0.01)
   --mode MODE           train, test or infer (default: test)
