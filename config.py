@@ -12,6 +12,10 @@ n_cores = max(mp.cpu_count()-2, 1)
 seed = 42
 generator = torch.Generator().manual_seed(seed)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+side = 224
+tile = side // 2
+lower_micrometer = 2
+upper_micrometer = 16
 
 def set_seed(seed=seed):
     os.environ['PYTHONHASHSEED'] = str(seed)

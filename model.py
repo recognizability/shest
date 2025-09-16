@@ -152,19 +152,20 @@ class Modeling():
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.palette = self.palette_subtype if self.cell_type == 'cell_subtype_expression' else self.palette_type
-
         self.gene_panel = config.gene_panel
 
         if args.mode == 'infer':
             self.inference_loader = dataset.loader()
             self.n_genes = len(self.gene_panel)
+            self.stem_file = args.platform
+            for source, sample in zip(args.sources, args.samples, strict=True):
+                self.stem_file += f"_{source}_{sample}"
         else:
             self.train_loader, self.test_loader = dataset.loader()
             self.genes = dataset.genes
             self.n_genes = len(self.genes)
+            self.stem_file = dataset.stem_file
 
-        self.stem_file = dataset.stem_file
-            
         self.label_encoder = config.label_encoder
         self.classes = config.classes
         self.n_classes = len(self.classes)
@@ -277,14 +278,17 @@ class Modeling():
                     break
 
             if not escape:
+                print(f"Saving the weights into {weights_file} ... ", end='')
                 torch.save(self.model.state_dict(), weights_file)
+                print("done.")
 
             gc.collect()
             torch.cuda.empty_cache()
 
         else: 
-            print(f"Loading weights from {weights_file} ...")
+            print(f"Loading the weights from {weights_file} ... ", end='')
             self.model.load_state_dict(torch.load(weights_file, map_location=device))
+            print("done.")
 
     def evaluate(self, test_loader=None):
         if test_loader is None:
