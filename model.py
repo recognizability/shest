@@ -37,13 +37,13 @@ from config import n_cores, seed, set_seed, generator, device
 
 sc.settings.n_jobs = n_cores
 in_features = 1536 #output features of H-optimus-0
+#in_features = 1000 #output features of ViT or SwinTransformer
 
 class Encoder(nn.Module):
     def __init__(self):
         super().__init__()
-        self.encoder = timm.create_model(
-            "hf-hub:bioptimus/H-optimus-0", pretrained=True, init_values=1e-5, dynamic_img_size=True
-        )
+        self.encoder = timm.create_model("hf-hub:bioptimus/H-optimus-0", pretrained=True, init_values=1e-5, dynamic_img_size=True)
+#        self.encoder = getattr(models, "vit_b_16")(weights="IMAGENET1K_V1")
         for param in self.encoder.parameters():
             param.requires_grad = False
 
@@ -341,7 +341,7 @@ class Modeling():
 
         self.images = torch.cat(images).numpy()
         self.expressions = torch.cat(expressions).numpy()
-        self.embeddings = torch.cat(embeddings).numpy()
+        self.embeddings = torch.cat(embeddings).to(torch.float32).cpu().numpy()
         self.reconstructions = torch.cat(reconstructions).numpy()
         self.labels = self.label_encoder.inverse_transform(
             torch.cat(labels).numpy()

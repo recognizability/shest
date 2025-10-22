@@ -40,6 +40,8 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Tumor cells LUAD MSLN',
             'Tumor cells LUAD NE',
             'Tumor cells LUAD mitotic',
+            'Alveolar cell type 2',
+            'Macrophage alveolar',
         ],
         "Macrophage": [
             "Macrophage",

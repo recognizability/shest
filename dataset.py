@@ -168,7 +168,7 @@ class Preprocessing():
             half = upper // 2
             self.images = {}
             print("Filtering and preparing cell images ...")
-            for cell_id, polygon in tqdm(exteriors.items(), total=len(exteriors)):
+            for cell_id, polygon in tqdm(self.exteriors.items(), total=len(self.exteriors)):
                 x, y = polygon.xy
                 if np.min(x) < 0 or np.max(x) >= self.width or np.min(y) < 0 or np.max(y) >= self.height:
                     continue
@@ -245,22 +245,23 @@ class Preprocessing():
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')
 
 class Images():
-    def __init__(self, args, images, cell_ids=None):
+    def __init__(self, args, images_raw, cell_ids=None):
         self.batch_size = args.batch_size
-        self.images_raw = images
+        self.images_raw = images_raw
         self.cell_ids = list(self.images_raw.keys()) if cell_ids is None else cell_ids
         self.images = self._image_tensor()
 
     def _image_tensor(self):
         images = []
-        print("Loading images ...")
+        print("Making the images into a tensor ...", end='')
         for cell_id in tqdm(self.cell_ids):
             image = self.images_raw[cell_id]
             images.append(image.unsqueeze(0))
-        images = torch.cat(images, dim=0).contiguous() / 255.0
+        images = torch.cat(images, dim=0).contiguous()
+        images.div_(255.0)
         mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1) #from H-optimus-0
         std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1) #from H-optimus-0
-        images = (images - mean) / std
+        images.sub_(mean).div_(std)
         print(len(images), "images are converted into a tensor.")
         return images
 
@@ -383,7 +384,7 @@ class Dataset():
             augmented_expressions = []
             augmented_labels = []
             augmented_cell_ids = []
-            print("Augmentating the dataset ...")
+            print("Augmenting the dataset ...")
             for c, indices in tqdm(class_indices.items()):
                 repeat = max_count // len(indices)
                 remain = max_count % len(indices)
