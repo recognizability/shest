@@ -31,6 +31,3 @@ if __name__ == "__main__":
     dataset = Dataset(args, config)
     modeling = Modeling(args, config, dataset)
     modeling.evaluate()
-    modeling.draw_confusion_matrix()
-    if not 'subtype' in args.cell_type:
-        modeling.draw_heatmap()

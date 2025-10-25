@@ -6,7 +6,6 @@ from sklearn.preprocessing import LabelEncoder
 import torch
 import multiprocessing as mp
 import seaborn as sns
-from pprint import pprint
 
 n_cores = max(mp.cpu_count()-2, 1)
 seed = 42

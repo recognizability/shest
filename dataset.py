@@ -9,10 +9,8 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-import matplotlib.pyplot as plt
 import shapely
 from skimage.draw import polygon2mask
-from skimage.color import rgb2hed, hed2rgb
 
 import scanpy as sc
 import spatialdata as sd
@@ -280,6 +278,7 @@ class Images():
 class Load(Images):
     def __init__(self, args, config, source, sample):
         self.directory = args.directory
+        self.mode = args.mode
         self.cell_type = args.cell_type
         self.cell_types = config.cell_types
         self.cell_subtypes = config.cell_subtypes
@@ -307,6 +306,7 @@ class Load(Images):
         print('Common', len(self.cell_ids), "cells are selected.")
 
         super().__init__(args, self.images_raw, self.cell_ids)
+
         self.image = preprocessed.image
         self.width = preprocessed.width
         self.height = preprocessed.height
@@ -327,10 +327,12 @@ class Load(Images):
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
         image = self.images[i]
-        expression = self.expressions[i]
-        label = self.labels[i]
-
-        return cell_id, image, expression, label
+        if self.mode == "infer":
+            return cell_id, image
+        else:
+            expression = self.expressions[i]
+            label = self.labels[i]
+            return cell_id, image, expression, label
 
 class Dataset():
     def __init__(self, args, config):
