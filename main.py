@@ -31,3 +31,4 @@ if __name__ == "__main__":
     dataset = Dataset(args, config)
     modeling = Modeling(args, config, dataset)
     modeling.evaluate()
+    modeling.draw()

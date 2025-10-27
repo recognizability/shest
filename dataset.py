@@ -11,6 +11,7 @@ from scipy import sparse
 
 import shapely
 from skimage.draw import polygon2mask
+from skimage.color import rgb2hed, hed2rgb
 
 import scanpy as sc
 import spatialdata as sd
@@ -193,17 +194,20 @@ class Preprocessing():
                 ) for x, y in polygon.coords]
                 mask = polygon2mask(window_image.shape[1:], polygon_shifted)
                 mask = torch.from_numpy(mask).unsqueeze(0).float()
-                window_image_masked = window_image*mask
+                window_image_masked = window_image * mask
 
-                center = window_image.shape[1] // 2
-                nucleus_image = window_image[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
-                nucleus_image = F.interpolate(nucleus_image.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
-                nucleus_image_masked = window_image_masked[:, center-nucleus//2:center+nucleus//2+1, center-nucleus//2:center+nucleus//2+1]
-                nucleus_image_masked = F.interpolate(nucleus_image_masked.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
+                transposed = window_image.numpy().transpose(1, 2, 0).astype(np.uint8)
+                hed = rgb2hed(transposed)
+                null = np.zeros_like(transposed[:, :, 0])
+                hematoxylin_transposed = hed2rgb(np.stack((hed[:, :, 0], null, null), axis=-1))
+                hematoxylin = torch.from_numpy((hematoxylin_transposed * 255).astype(np.uint8)).permute(2, 0, 1).float()
+                hematoxylin = F.interpolate(hematoxylin.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
+                hematoxylin_masked = hematoxylin * mask
+                hematoxylin_masked = F.interpolate(hematoxylin_masked.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
 
                 self.images[cell_id] = torch.cat([
                     torch.cat([window_image, window_image_masked], dim=2),
-                    torch.cat([nucleus_image, nucleus_image_masked], dim=2)
+                    torch.cat([hematoxylin, hematoxylin_masked], dim=2)
                 ], dim=1)
 
             print("Saving the images ...", end=' ')
