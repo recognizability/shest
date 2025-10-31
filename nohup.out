@@ -743,3 +743,132 @@ Traceback (most recent call last):
   File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/pandas/core/indexes/base.py", line 3812, in get_loc
     raise KeyError(key) from err
 KeyError: 'cell_type'
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/pyproj/network.py:59: UserWarning: pyproj unable to set PROJ database path.
+  _set_context_ca_bundle_path(ca_bundle_path)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/xarray_schema/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/utils.py:429: FutureWarning: Importing read_text from `anndata` is deprecated. Import anndata.io.read_text instead.
+  warnings.warn(msg, FutureWarning)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/pyproj/network.py:59: UserWarning: pyproj unable to set PROJ database path.
+  _set_context_ca_bundle_path(ca_bundle_path)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/xarray_schema/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/utils.py:429: FutureWarning: Importing read_text from `anndata` is deprecated. Import anndata.io.read_text instead.
+  warnings.warn(msg, FutureWarning)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+The classes are: ['Tumor_cell_LUAD' 'Macrophage' 'Endothelial_cell' 'Stromal_cell'
+ 'Lymphocyte']
+Loading the sdata ... done.
+Loading the annotations ... done.
+Loading the images and centroids... done.
+268183 images are prepared.
+34930 cells are annotated by thier morphologies.
+Only the 34930 cells are annotated by the morphology and the single cell reference
+Only 34930 cells common to both annotation and area filtering are prepared.
+268183 images of the cells are prepared.
+Expression profile and their cell types loading ... (278328, 5001)
+34930 of annotated cells are loaded.
+Common 34930 cells are selected.
+Making the images into tensors ...  0%|          | 0/34930 [00:00<?, ?it/s]100%|██████████| 34930/34930 [00:00<00:00, 510257.03it/s]
+torch.Size([34930, 3, 224, 224]) images tensor is made.
+cell_ids: 34930
+classes: {'Tumor_cell_LUAD': 16568, 'Macrophage': 1813, 'Endothelial_cell': 2307, 'Stromal_cell': 1704, 'Lymphocyte': 12538}
+stem_file: Xenium_Prime_10X_Human_Lung_Cancer
+Train classes: {'Tumor_cell_LUAD': 13193, 'Macrophage': 1464, 'Endothelial_cell': 1830, 'Stromal_cell': 1356, 'Lymphocyte': 10101}
+Test classes: {'Tumor_cell_LUAD': 3375, 'Macrophage': 349, 'Endothelial_cell': 477, 'Stromal_cell': 348, 'Lymphocyte': 2437}
+Augmenting the training dataset ...
+  0%|          | 0/5 [00:00<?, ?it/s] 20%|██        | 1/5 [00:10<00:40, 10.20s/it] 40%|████      | 2/5 [00:20<00:30, 10.15s/it] 60%|██████    | 3/5 [00:30<00:20, 10.05s/it] 80%|████████  | 4/5 [00:38<00:09,  9.41s/it]100%|██████████| 5/5 [00:48<00:00,  9.41s/it]100%|██████████| 5/5 [00:48<00:00,  9.61s/it]
+augmented_train_indices: 5
+augmented_train_cell_ids: 65965
+augmented_train_images: torch.Size([65965, 3, 224, 224])
+augmented_train_expressions: torch.Size([65965, 5001])
+augmented_train_labels: torch.Size([65965])
+{0: 13193, 1: 13193, 2: 13193, 3: 13193, 4: 13193}
+augmented_cell_ids: 72951
+augmented_images: torch.Size([72951, 3, 224, 224])
+augmented_expressions: torch.Size([72951, 5001])
+augmented_label: torch.Size([72951])
+Training the model ...
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:03<01:29,  3.32s/it]  7%|▋         | 2/28 [00:06<01:22,  3.16s/it] 11%|█         | 3/28 [00:09<01:13,  2.95s/it] 14%|█▍        | 4/28 [00:11<01:08,  2.84s/it] 18%|█▊        | 5/28 [00:14<01:03,  2.78s/it] 21%|██▏       | 6/28 [00:17<01:00,  2.74s/it] 25%|██▌       | 7/28 [00:19<00:57,  2.72s/it] 29%|██▊       | 8/28 [00:22<00:54,  2.71s/it] 32%|███▏      | 9/28 [00:25<00:51,  2.70s/it] 36%|███▌      | 10/28 [00:27<00:48,  2.70s/it] 39%|███▉      | 11/28 [00:30<00:45,  2.70s/it] 43%|████▎     | 12/28 [00:33<00:43,  2.70s/it] 46%|████▋     | 13/28 [00:35<00:40,  2.70s/it] 50%|█████     | 14/28 [00:38<00:37,  2.70s/it] 54%|█████▎    | 15/28 [00:41<00:35,  2.71s/it] 57%|█████▋    | 16/28 [00:44<00:32,  2.71s/it] 61%|██████    | 17/28 [00:46<00:29,  2.71s/it] 64%|██████▍   | 18/28 [00:49<00:27,  2.71s/it] 68%|██████▊   | 19/28 [00:52<00:24,  2.72s/it] 71%|███████▏  | 20/28 [00:54<00:21,  2.72s/it] 75%|███████▌  | 21/28 [00:57<00:19,  2.73s/it] 79%|███████▊  | 22/28 [01:00<00:16,  2.74s/it] 82%|████████▏ | 23/28 [01:03<00:13,  2.75s/it] 86%|████████▌ | 24/28 [01:05<00:10,  2.75s/it] 89%|████████▉ | 25/28 [01:08<00:08,  2.74s/it] 93%|█████████▎| 26/28 [01:11<00:05,  2.73s/it] 96%|█████████▋| 27/28 [01:14<00:02,  2.74s/it]100%|██████████| 28/28 [01:15<00:00,  2.19s/it]100%|██████████| 28/28 [01:15<00:00,  2.68s/it]
+Epoch: 1/40, classification loss: 1.65737, reconstruction loss: 0.95650
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:02<01:14,  2.75s/it]  7%|▋         | 2/28 [00:05<01:11,  2.74s/it] 11%|█         | 3/28 [00:08<01:08,  2.73s/it] 14%|█▍        | 4/28 [00:10<01:05,  2.73s/it] 18%|█▊        | 5/28 [00:13<01:02,  2.73s/it] 21%|██▏       | 6/28 [00:16<01:00,  2.73s/it] 25%|██▌       | 7/28 [00:19<00:57,  2.75s/it] 29%|██▊       | 8/28 [00:21<00:55,  2.77s/it] 32%|███▏      | 9/28 [00:24<00:52,  2.77s/it] 36%|███▌      | 10/28 [00:27<00:50,  2.79s/it] 39%|███▉      | 11/28 [00:30<00:47,  2.78s/it] 43%|████▎     | 12/28 [00:33<00:44,  2.79s/it] 46%|████▋     | 13/28 [00:35<00:41,  2.79s/it] 50%|█████     | 14/28 [00:38<00:39,  2.80s/it] 54%|█████▎    | 15/28 [00:41<00:36,  2.80s/it] 57%|█████▋    | 16/28 [00:44<00:33,  2.80s/it] 61%|██████    | 17/28 [00:47<00:30,  2.80s/it] 64%|██████▍   | 18/28 [00:50<00:28,  2.86s/it] 68%|██████▊   | 19/28 [00:52<00:25,  2.83s/it] 71%|███████▏  | 20/28 [00:55<00:22,  2.82s/it] 75%|███████▌  | 21/28 [00:58<00:19,  2.80s/it] 79%|███████▊  | 22/28 [01:01<00:16,  2.80s/it] 82%|████████▏ | 23/28 [01:04<00:13,  2.79s/it] 86%|████████▌ | 24/28 [01:06<00:11,  2.78s/it] 89%|████████▉ | 25/28 [01:09<00:08,  2.78s/it] 93%|█████████▎| 26/28 [01:12<00:05,  2.77s/it] 96%|█████████▋| 27/28 [01:15<00:02,  2.78s/it]100%|██████████| 28/28 [01:15<00:00,  2.20s/it]100%|██████████| 28/28 [01:15<00:00,  2.71s/it]
+Epoch: 2/40, classification loss: 0.59427, reconstruction loss: 0.49453
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:02<01:14,  2.77s/it]  7%|▋         | 2/28 [00:05<01:12,  2.79s/it] 11%|█         | 3/28 [00:08<01:10,  2.81s/it] 14%|█▍        | 4/28 [00:11<01:07,  2.80s/it]/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/pyproj/network.py:59: UserWarning: pyproj unable to set PROJ database path.
+  _set_context_ca_bundle_path(ca_bundle_path)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/xarray_schema/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/utils.py:429: FutureWarning: Importing read_text from `anndata` is deprecated. Import anndata.io.read_text instead.
+  warnings.warn(msg, FutureWarning)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/pyproj/network.py:59: UserWarning: pyproj unable to set PROJ database path.
+  _set_context_ca_bundle_path(ca_bundle_path)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/xarray_schema/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/utils.py:429: FutureWarning: Importing read_text from `anndata` is deprecated. Import anndata.io.read_text instead.
+  warnings.warn(msg, FutureWarning)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+The classes are: ['Tumor_cell_LUAD' 'Macrophage' 'Endothelial_cell' 'Stromal_cell'
+ 'Lymphocyte']
+Loading the sdata ... done.
+Loading the annotations ... done.
+Loading the images and centroids... done.
+268183 images are prepared.
+34930 cells are annotated by thier morphologies.
+Only the 34930 cells are annotated by the morphology and the single cell reference
+Only 34930 cells common to both annotation and area filtering are prepared.
+268183 images of the cells are prepared.
+Expression profile and their cell types loading ... (278328, 5001)
+34930 of annotated cells are loaded.
+Common 34930 cells are selected.
+Making the images into tensors ...  0%|          | 0/34930 [00:00<?, ?it/s]100%|██████████| 34930/34930 [00:00<00:00, 510363.68it/s]
+torch.Size([34930, 3, 224, 224]) images tensor is made.
+cell_ids: 34930
+classes: {'Tumor_cell_LUAD': 16568, 'Macrophage': 1813, 'Endothelial_cell': 2307, 'Stromal_cell': 1704, 'Lymphocyte': 12538}
+stem_file: Xenium_Prime_10X_Human_Lung_Cancer
+Train classes: {'Tumor_cell_LUAD': 13193, 'Macrophage': 1464, 'Endothelial_cell': 1830, 'Stromal_cell': 1356, 'Lymphocyte': 10101}
+Test classes: {'Tumor_cell_LUAD': 3375, 'Macrophage': 349, 'Endothelial_cell': 477, 'Stromal_cell': 348, 'Lymphocyte': 2437}
+Augmenting the training dataset ...
+  0%|          | 0/5 [00:00<?, ?it/s] 20%|██        | 1/5 [00:09<00:37,  9.37s/it] 40%|████      | 2/5 [00:17<00:25,  8.37s/it] 60%|██████    | 3/5 [00:24<00:15,  7.95s/it] 80%|████████  | 4/5 [00:32<00:07,  7.85s/it]100%|██████████| 5/5 [00:39<00:00,  7.79s/it]100%|██████████| 5/5 [00:39<00:00,  7.97s/it]
+augmented_train_indices: 65965
+augmented_train_cell_ids: 65965
+augmented_train_images: torch.Size([65965, 3, 224, 224])
+augmented_train_expressions: torch.Size([65965, 5001])
+augmented_train_labels: torch.Size([65965])
+{0: 13193, 1: 13193, 2: 13193, 3: 13193, 4: 13193}
+augmented_cell_ids: 72951
+augmented_images: torch.Size([72951, 3, 224, 224])
+augmented_expressions: torch.Size([72951, 5001])
+augmented_label: torch.Size([72951])
+Training the model ...
+  0%|          | 0/65 [00:00<?, ?it/s]  0%|          | 0/65 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/home/hoyeon/crp/shest/main.py", line 32, in <module>
+    modeling = Modeling(args, config, dataset)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/crp/shest/model.py", line 193, in __init__
+    self.load()
+  File "/home/hoyeon/crp/shest/model.py", line 219, in load
+    for cell_id, image, expression, label in tqdm(self.train_loader):
+                                             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+               ^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 701, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 757, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/_utils/fetch.py", line 50, in fetch
+    data = self.dataset.__getitems__(possibly_batched_index)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/dataset.py", line 418, in __getitems__
+    return self.dataset.__getitems__([self.indices[idx] for idx in indices])  # type: ignore[attr-defined]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hoyeon/anaconda3/envs/sc/lib/python3.12/site-packages/torch/utils/data/dataset.py", line 420, in __getitems__
+    return [self.dataset[self.indices[idx]] for idx in indices]
+                         ~~~~~~~~~~~~^^^^^
+IndexError: list index out of range

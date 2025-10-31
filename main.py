@@ -3,7 +3,7 @@ import pprint
 import torch
 
 from config import seed, set_seed, Config
-from dataset import Dataset
+from data import Dataset
 from model import Modeling
 
 if __name__ == "__main__":
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
     parser.add_argument("--save_image", action="store_true", help="Force saving images")
     parser.add_argument("--batch_size", type=int, default=1024, help="Batch size of data loader")
-    parser.add_argument("--not_augment", action="store_true", help="Do not augment for class balancing")
+    parser.add_argument("--split", type=float, default=0.8, help="spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
     parser.add_argument("--mode", type=str, default="test", help="train, test or infer")
@@ -30,5 +30,4 @@ if __name__ == "__main__":
     config = Config(args)
     dataset = Dataset(args, config)
     modeling = Modeling(args, config, dataset)
-    modeling.evaluate()
     modeling.draw()

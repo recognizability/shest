@@ -23,7 +23,7 @@ import tacco as tc
 import torch
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, Subset
 
 from config import n_cores, generator, seed, set_seed, side, tile, lower_micrometer, upper_micrometer
 
@@ -42,6 +42,8 @@ class Preprocessing():
         self.cell_subtype = config.cell_subtype
         self.cell_subtypes = config.cell_subtypes
         self.subtype_to_type = {subtype: category for category, subtypes in self.cell_types.items() for subtype in subtypes}
+        self.palette_type = config.palette_type
+        self.palette_subtype = config.palette_subtype
 
         self.stem_directory = f"{args.platform}/{source}/{sample}/"
         self.pixel_size = json.load(open(self.raw_directory + self.stem_directory + "experiment.xenium"))['pixel_size'] # micrometers per pixel
@@ -63,6 +65,7 @@ class Preprocessing():
         self.annotated_cell_ids = None
         self.image_ids = None
         self.images = None
+        self.centroids = None
         self.cell_ids = None
         self.exteriors = None
         
@@ -136,8 +139,10 @@ class Preprocessing():
         inclusion = self.adata.obs[self.cell_subtype].isin(self.cell_subtypes)
         self.adata.obs.loc[inclusion, 'cell_subtype_expression'] = self.adata.obs.loc[inclusion, self.cell_subtype]
         self.adata.obs['cell_subtype_expression'] = pd.Categorical(self.adata.obs['cell_subtype_expression'], categories=self.cell_subtypes, ordered=True)
+        self.adata.uns['cell_subtype_expression_colors'] = [self.palette_subtype[ct] for ct in self.cell_subtypes]
         self.adata.obs['cell_type_expression'] = self.adata.obs[self.cell_subtype].map(self.subtype_to_type)
         self.adata.obs['cell_type_expression'] = pd.Categorical(self.adata.obs['cell_type_expression'], categories=self.cell_types.keys(), ordered=True)
+        self.adata.uns['cell_type_expression_colors'] = [self.palette_type[ct] for ct in self.cell_types.keys()]
 
     def _transform(self, polygon):
         x, y = polygon.exterior.xy
@@ -161,11 +166,13 @@ class Preprocessing():
         images_directory = os.path.join(self.processing_directory, 'images/')
         os.makedirs(images_directory, exist_ok=True)
         images_file = images_directory + f"images.pkl"
-        if not os.path.exists(images_file) or self.save_image:
+        centroids_file = images_directory + f"centroids.pkl"
+        if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)) or self.save_image:
             lower = int(round(lower_micrometer/self.pixel_size)) #pixels
             upper = int(round(upper_micrometer/self.pixel_size)) #pixels
             half = upper // 2
             self.images = {}
+            centroids = {}
             print("Filtering and preparing cell images ...")
             for cell_id, polygon in tqdm(self.exteriors.items(), total=len(self.exteriors)):
                 x, y = polygon.xy
@@ -209,14 +216,19 @@ class Preprocessing():
                     torch.cat([window_image, window_image_masked], dim=2),
                     torch.cat([hematoxylin, hematoxylin_masked], dim=2)
                 ], dim=1)
+                centroids[cell_id] = torch.tensor([x_centroid, y_centroid])
+            self.centroids = centroids
 
-            print("Saving the images ...", end=' ')
+            print("Saving the images and centroids ...", end=' ')
             joblib.dump(self.images, os.path.join(images_file), compress=0)
+            joblib.dump(centroids, os.path.join(centroids_file), compress=0)
             print("done.")
         else:
-            print("Loading the images ...", end=' ')
+            print("Loading the images and centroids...", end=' ')
             with open(file=os.path.join(images_file), mode='rb') as f:
                 self.images = joblib.load(f)
+            with open(file=os.path.join(centroids_file), mode='rb') as f:
+                self.centroids = joblib.load(f)
             print("done.")
 
         self.image_ids = list(self.images.keys())
@@ -239,23 +251,27 @@ class Preprocessing():
             self.cell_ids = sorted(list(set(self.annotated_cell_ids) & set(self.image_ids)))
             print(f"Only {len(self.cell_ids)} cells common to both annotation and area filtering are prepared.")
             self.adata.obs['cell_type'] = self.adata.obs['cell_type_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+            self.adata.obs['cell_type'] = pd.Categorical(self.adata.obs['cell_type'], categories=self.cell_types.keys(), ordered=True)
+            self.adata.uns['cell_type_colors'] = [self.palette_type[ct] for ct in self.cell_types.keys()]
             self.adata.obs['cell_subtype'] = self.adata.obs['cell_subtype_annotation'].where(self.adata.obs.index.isin(self.cell_ids), other=np.nan)
+            self.adata.obs['cell_subtype'] = pd.Categorical(self.adata.obs['cell_subtype'], categories=self.cell_types.keys(), ordered=True)
+            self.adata.uns['cell_subtype_colors'] = [self.palette_subtype[ct] for ct in self.cell_subtypes]
             
             self.adata.obs = self.adata.obs[['cell_subtype_expression', 'cell_type_expression', 'cell_type_morphology', 'cell_subtype_annotation', 'cell_type_annotation', 'cell_subtype', 'cell_type']]
 
         self.adata.raw = self.adata
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')
 
-class Images():
+class Images(): #for only images
     def __init__(self, args, images_raw, cell_ids=None):
         self.batch_size = args.batch_size
         self.images_raw = images_raw
         self.cell_ids = list(self.images_raw.keys()) if cell_ids is None else cell_ids
-        self.images = self._image_tensor()
+        self.images = self._tensor()
 
-    def _image_tensor(self):
+    def _tensor(self):
         images = []
-        print("Making the images into a tensor ...", end='')
+        print("Making the images into tensors ...", end='')
         for cell_id in tqdm(self.cell_ids):
             image = self.images_raw[cell_id]
             images.append(image.unsqueeze(0))
@@ -264,7 +280,7 @@ class Images():
         mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1) #from H-optimus-0
         std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1) #from H-optimus-0
         images.sub_(mean).div_(std)
-        print(len(images), "images are converted into a tensor.")
+        print(images.shape, "images tensor is made.")
         return images
 
     def __len__(self):
@@ -276,10 +292,9 @@ class Images():
         return cell_id, image
 
     def loader(self):
-        total = len(self)
         return DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
 
-class Load(Images):
+class Load(Images): #for a single dataset
     def __init__(self, args, config, source, sample):
         self.directory = args.directory
         self.mode = args.mode
@@ -289,15 +304,17 @@ class Load(Images):
         self.palette_type = config.palette_type
         self.palette_subtype = config.palette_subtype
         self.batch_size = args.batch_size
+        self.split = args.split
         self.stem_file = f"{args.platform}_{source}_{sample}"
 
         preprocessed = Preprocessing(args, config, source, sample)
 
         stem_directory = f"{args.platform}/{source}/{sample}/"
         processing_directory = self.directory + 'dataset/' + stem_directory
-        self.images_raw = preprocessed.images
-        self.image_ids = preprocessed.image_ids
-        print(len(self.image_ids), "images of the cells are prepared.")
+        images_raw = preprocessed.images
+        image_ids = preprocessed.image_ids
+        print(len(image_ids), "images of the cells are prepared.")
+        centroids_raw = preprocessed.centroids
 
         print('Expression profile and their cell types loading ... ', end='')
         self.adata_raw = preprocessed.adata
@@ -306,17 +323,26 @@ class Load(Images):
         type_ids = self.adata_raw.obs[self.cell_type].dropna().index.tolist()
         print(len(type_ids), "of annotated cells are loaded.")
 
-        self.cell_ids = sorted(list(set(self.image_ids) & set(type_ids)))
+        self.cell_ids = sorted(list(set(image_ids) & set(type_ids)))
         print('Common', len(self.cell_ids), "cells are selected.")
 
-        super().__init__(args, self.images_raw, self.cell_ids)
+        self.images = {}
+        centroids ={}
+        for cell_id in self.cell_ids:
+            self.images[cell_id] = images_raw[cell_id]
+            centroids[cell_id] = centroids_raw[cell_id]
+        self.centroids = np.vstack(list(centroids.values()))
+
+        super().__init__(args, self.images, self.cell_ids)
 
         self.image = preprocessed.image
         self.width = preprocessed.width
         self.height = preprocessed.height
         self.exteriors = preprocessed.exteriors
+        self.pixel_size = preprocessed.pixel_size
 
         self.adata = self.adata_raw[self.cell_ids, :].copy()
+        self.spatial = self.adata.obsm['spatial']
         self.cell_type_encoded = self.cell_type + '_encoded'
         self.label_encoder = config.label_encoder
         self.adata.obs[self.cell_type_encoded] = self.label_encoder.transform(self.adata.obs[self.cell_type])
@@ -331,22 +357,29 @@ class Load(Images):
     def __getitem__(self, i):
         cell_id = self.cell_ids[i]
         image = self.images[i]
-        if self.mode == "infer":
-            return cell_id, image
-        else:
-            expression = self.expressions[i]
-            label = self.labels[i]
-            return cell_id, image, expression, label
+        expression = self.expressions[i]
+        label = self.labels[i]
+#        centroids = self.centroids[i]
+#        return cell_id, image, expression, label, centroids
+        return cell_id, image, expression, label
 
-class Dataset():
+    def loader(self):
+        return DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+
+class Dataset(): #for multiple datasets and augmentation
     def __init__(self, args, config):
         self.batch_size = args.batch_size
+        self.split = args.split
+        self.mode = args.mode
         self.classes = config.classes
         cell_ids = []
         images = []
+        pixel_sizes = []
         expressions = []
         labels_raw = []
         labels = []
+        centroids = []
+        spatials = []
         genes = []
         stem_file = args.platform
         columns = []
@@ -354,9 +387,12 @@ class Dataset():
             loaded = Load(args, config, source, sample)
             cell_ids.extend(loaded.cell_ids)
             images.append(loaded.images)
+            pixel_sizes.append(loaded.pixel_size)
             expressions.append(loaded.expressions)
             labels_raw.extend(loaded.labels_raw)
             labels.append(loaded.labels)
+            centroids.append(loaded.centroids)
+            spatials.append(loaded.spatial)
             for gene in loaded.genes:
                 if gene not in genes:
                     genes.append(gene)
@@ -364,96 +400,139 @@ class Dataset():
             columns.extend(loaded.columns)
             del loaded
 
+        self.cell_ids = cell_ids
+        print('cell_ids:', len(self.cell_ids))
+        self.images = torch.cat(images, dim=0).contiguous()
+        self.pixel_sizes = pixel_sizes
+        self.expressions = torch.cat(expressions, dim=0).contiguous()
+        self.class_indices = {c: [i for i, label in enumerate(labels_raw) if label == c] for c in self.classes}
+        print("classes:", {c:len(indices) for c, indices in self.class_indices.items()})
+        self.labels = torch.cat(labels, dim=0).contiguous()
+        self.centroids = np.vstack(centroids)
+        self.spatials = np.vstack(spatials)
         self.genes = genes
         self.stem_file = stem_file
-        self.columns = columns
         print('stem_file:', self.stem_file)
+        self.columns = columns
 
-        class_indices = {c: [i for i, label in enumerate(labels_raw) if label == c] for c in self.classes}
-        print("classes:", {c:len(indices) for c, indices in class_indices.items()})
+        self.augmented = False
+        if (0 < self.split < 1) and (self.mode in ['train', 'test']):
+            self._split()
+            if self.mode == 'train':
+                self._augment()
+                self.augmented = True
 
-        images = torch.cat(images, dim=0).contiguous()
-        expressions = torch.cat(expressions, dim=0).contiguous()
-        labels = torch.cat(labels, dim=0).contiguous()
+    def _split(self):
+        total = len(self.cell_ids)
+        train_size = int(round(self.split * total))
+        print("train_size:", train_size)
+        test_size = total - train_size
+        print("test_size:", test_size)
+        self.train_dataset, self.test_dataset = random_split(self, [train_size, test_size], generator=generator)
 
-        if args.not_augment:
-            self.cell_ids = cell_ids
-            self.images = images
-            self.expressions = expressions
-            self.labels = labels
-        else:
-            max_count = max(len(indices) for indices in class_indices.values())
-            angles = [0, 90, 180, 270]
-            flips = [None, "h", "v", "hv"]
-            rng = np.random.default_rng(seed)
-            augmented_images = []
-            augmented_expressions = []
-            augmented_labels = []
-            augmented_cell_ids = []
-            print("Augmenting the dataset ...")
-            for c, indices in tqdm(class_indices.items()):
-                repeat = max_count // len(indices)
-                remain = max_count % len(indices)
-                expanded_indices = indices * repeat + indices[:remain]
-                for i in expanded_indices:
-                    image = images[i]
-                    image_tiles = [
-                        image[..., :tile, :tile],
-                        image[..., :tile, tile:],
-                        image[..., tile:, :tile],
-                        image[..., tile:, tile:],
-                    ]
-                    expression = expressions[i]
-                    label = labels[i]
-                    cell_id = cell_ids[i]
-                    angle = int(rng.choice(angles))
-                    flip = str(rng.choice(flips))
-                    if angle != 0:
-                        image_tiles = [transforms.functional.rotate(t, angle) for t in image_tiles]
-                    if flip == "h":
-                        image_tiles = [transforms.functional.hflip(t) for t in image_tiles]
-                    elif flip == "v":
-                        image_tiles = [transforms.functional.vflip(t) for t in image_tiles]
-                    elif flip == "hv":
-                        image_tiles = [transforms.functional.hflip(transforms.functional.vflip(t)) for t in image_tiles]
-                    image = torch.cat([
-                        torch.cat(image_tiles[:2], dim=-1),
-                        torch.cat(image_tiles[2:], dim=-1),
-                    ], dim=-2)
-                    augmented_images.append(image.unsqueeze(0)) 
-                    augmented_expressions.append(expression.unsqueeze(0)) 
-                    augmented_labels.append(label.unsqueeze(0)) 
-                    augmented_cell_ids.append(cell_id)
+        self.train_indices = self.train_dataset.indices
+        self.test_indices = self.test_dataset.indices
+        self.train_class_indices = {c: [i for i in self.class_indices[c] if i in self.train_indices] for c in self.classes}
+        print("Train classes:", {c:len(indices) for c, indices in self.train_class_indices.items()})
+        self.test_class_indices = {c: [i for i in self.class_indices[c] if i in self.test_indices] for c in self.classes}
+        print("Test classes:", {c:len(indices) for c, indices in self.test_class_indices.items()})
+        self.train_cell_ids = [self.cell_ids[i] for i in self.train_indices]
+        self.test_cell_ids = [self.cell_ids[i] for i in self.test_indices]
+        self.test_centroids = self.centroids[self.test_indices]
+        self.test_spatials = self.spatials[self.test_indices]
 
-            print("augmented_labels:", dict(Counter([int(label) for label in augmented_labels])))
-            self.cell_ids = augmented_cell_ids
-            self.images = torch.cat(augmented_images, dim=0)
-            self.expressions = torch.cat(augmented_expressions, dim=0)
-            self.labels = torch.cat(augmented_labels, dim=0)
+    def _augment(self):
+        max_count = max(len(indices) for indices in self.train_class_indices.values())
+        angles = [0, 90, 180, 270]
+        flips = [None, "h", "v", "hv"]
+        rng = np.random.default_rng(seed)
 
-        print('cell_ids:', len(self.cell_ids))
+        augmented_train_cell_ids = []
+        augmented_train_images = []
+        augmented_train_expressions = []
+        augmented_train_labels = []
+
+        print("Augmenting the training dataset ...")
+        for c, indices in tqdm(self.train_class_indices.items()):
+            repeat = max_count // len(indices)
+            remain = max_count % len(indices)
+            expanded_indices = indices * repeat + indices[:remain]
+            for i in expanded_indices:
+                cell_id = self.cell_ids[i]
+                image = self.images[i]
+                image_tiles = [
+                    image[..., :tile, :tile],
+                    image[..., :tile, tile:],
+                    image[..., tile:, :tile],
+                    image[..., tile:, tile:],
+                ]
+                angle = int(rng.choice(angles))
+                flip = str(rng.choice(flips))
+                if angle != 0:
+                    image_tiles = [transforms.functional.rotate(t, angle) for t in image_tiles]
+                if flip == "h":
+                    image_tiles = [transforms.functional.hflip(t) for t in image_tiles]
+                elif flip == "v":
+                    image_tiles = [transforms.functional.vflip(t) for t in image_tiles]
+                elif flip == "hv":
+                    image_tiles = [transforms.functional.hflip(transforms.functional.vflip(t)) for t in image_tiles]
+                image = torch.cat([
+                    torch.cat(image_tiles[:2], dim=-1),
+                    torch.cat(image_tiles[2:], dim=-1),
+                ], dim=-2)
+                expression = self.expressions[i]
+                label = self.labels[i]
+
+                augmented_train_cell_ids.append(cell_id)
+                augmented_train_images.append(image.unsqueeze(0)) 
+                augmented_train_expressions.append(expression.unsqueeze(0)) 
+                augmented_train_labels.append(label.unsqueeze(0)) 
+
+        self.augmented_train_cell_ids = augmented_train_cell_ids
+        self.augmented_train_images = torch.cat(augmented_train_images, dim=0)
+        self.augmented_train_expressions = torch.cat(augmented_train_expressions, dim=0)
+        self.augmented_train_labels = torch.cat(augmented_train_labels, dim=0)
+        print(dict(Counter([int(label) for label in augmented_train_labels])))
+
+        self.augmented_cell_ids = self.augmented_train_cell_ids + self.test_cell_ids
+        self.augmented_images = torch.cat([self.augmented_train_images, self.images[self.test_indices]], dim=0)
+        self.augmented_expressions = torch.cat([self.augmented_train_expressions, self.expressions[self.test_indices]], dim=0)
+        self.augmented_labels = torch.cat([self.augmented_train_labels, self.labels[self.test_indices]], dim=0)
+
+        split_index = len(self.augmented_train_cell_ids)
+        end_index = len(self.augmented_cell_ids)
+        self.augmented_train_dataset = Subset(self, list(range(split_index)))
+        self.reindexed_test_dataset = Subset(self, list(range(split_index, end_index)))
+        print("augmented_train_dataset:", len(self.augmented_train_dataset))
 
     def __len__(self):
-        return len(self.cell_ids)
+        if self.augmented:
+            return len(self.augmented_cell_ids)
+        else: 
+            return len(self.cell_ids)
 
     def __getitem__(self, i):
-        cell_id = self.cell_ids[i]
-        image = self.images[i]
-        expression = self.expressions[i]
-        label = self.labels[i]
-
+        if self.augmented:
+            cell_id = self.augmented_cell_ids[i]
+            image = self.augmented_images[i]
+            expression = self.augmented_expressions[i]
+            label = self.augmented_labels[i]
+        else: 
+            cell_id = self.cell_ids[i]
+            image = self.images[i]
+            expression = self.expressions[i]
+            label = self.labels[i]
         return cell_id, image, expression, label
 
-    def loader(self, split=0.8):
-        total = len(self)
-        if split==1 or split==0:
+    def loader(self):
+        if (0 < self.split < 1) and (self.mode in ['train', 'test']):
+            if self.mode == 'train':
+                train_loader = DataLoader(self.augmented_train_dataset, batch_size=self.batch_size, shuffle=True, pin_memory=True) #have to be shuffled because it is the order of classes
+                test_loader = DataLoader(self.reindexed_test_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+            elif self.mode == 'test':
+                train_loader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True) #already randomly sampled. actually not used
+                test_loader = DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
+            return train_loader, test_loader
+        elif self.mode == 'infer':
             data_loader = DataLoader(self, batch_size=self.batch_size, shuffle=False, pin_memory=True)
             return data_loader
-        else:
-            train_size = int(split * total)
-            test_size = total - train_size
-            train_dataset, test_dataset = random_split(self, [train_size, test_size], generator=generator)
-            print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False, pin_memory=True)
-            return train_loader, test_loader
