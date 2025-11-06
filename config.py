@@ -33,14 +33,16 @@ def set_seed(seed=seed):
 
 cell_types = { #cell subtypes from CZ CELLxGENE Discover
     'lung':{
+        'Alveolar_cell': [
+            'Alveolar cell type 1',
+            'Alveolar cell type 2',
+        ],
         'Tumor_cell_LUAD': [
             'Tumor cells LUAD',
             'Tumor cells LUAD EMT',
             'Tumor cells LUAD MSLN',
             'Tumor cells LUAD NE',
             'Tumor cells LUAD mitotic',
-            'Alveolar cell type 2',
-            'Macrophage alveolar',
         ],
         "Macrophage": [
             "Macrophage",
@@ -51,12 +53,10 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Endothelial cell lymphatic',
             'Endothelial cell venous',
         ],
-        'Stromal_cell': [
+        'Fibroblast': [
             'Fibroblast adventitial',
             'Fibroblast alveolar',
             'Fibroblast peribronchial',
-            'Smooth muscle cell',
-            'Pericyte',
         ],
         'Lymphocyte': [
             'Plasma cell',
@@ -71,55 +71,10 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'NK cell',
         ],
     },
-    'breast': {
-        "Tumor_cell_BRCA": [
-            "luminal epithelial cell of mammary gland", 
-            "mammary gland epithelial cell",
-        ], 
-        "Macrophage": [
-            "macrophage",
-        ], 
-        "Endothelial_cell": [
-            "endothelial cell", 
-            "endothelial cell of lymphatic vessel"
-        ], 
-        'Stromal_cell': [
-            "fibroblast of breast",
-            "pericyte",
-        ], 
-        'Lymphocyte': [
-            "memory B cell", 
-            "naive B cell", 
-            "T cell",
-            "CD4-positive, alpha-beta T cell",
-            "CD8-positive, alpha-beta T cell",
-            "mature NK T cell",
-            "natural killer cell",
-        ],
-    },
-    'skin':{
-        'Tumor_cell_SKCM':[
-            'malignant cell',
-        ],
-        "Macrophage": [
-        ], 
-        'Endothelial_cell':[
-            'endothelial cell',
-        ],
-        'Stromal_cell':[
-            'fibroblast',
-        ],
-        'Lymphocyte':[
-            'B cell',
-            'T cell',
-        ],
-    }
 }
 
 cell_subtype = {
     'lung':'cell_type_tumor',
-    'breast':'cell_type',
-    'skin':'cell_type',
 }
 
 class Config:
@@ -130,7 +85,7 @@ class Config:
         self.cell_subtype = next((subtype for organ, subtype in cell_subtype.items() if organ == self.organ), {}) #for the organ
         self.cell_subtypes = sum(self.cell_types.values(), [])
 
-        palette = 'blend:red,orange,yellow,green,blue'
+        palette = 'blend:pink,red,orange,yellow,green,blue'
         self.palette_type = dict(zip(
             self.cell_types.keys(),
             sns.color_palette(palette, n_colors=len(self.cell_types)).as_hex()

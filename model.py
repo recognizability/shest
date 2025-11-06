@@ -75,6 +75,7 @@ class Classifier(nn.Module):
         x = F.relu(self.norm2(self.fc2(x)))        
         x = self.dropout2(x)
         x = self.fc3(x)
+        x = F.log_softmax(x, dim=1)
         return x
 
 class Reconstructor(nn.Module):
@@ -115,9 +116,9 @@ class Model(nn.Module):
 
     def forward(self, x):
         embedding = self.encoder(x)
-        logit = self.classifier(embedding)
+        log_prob = self.classifier(embedding)
         mean, overdispersion, probability = self.reconstructor(embedding.clone())
-        return embedding, logit, mean, overdispersion, probability
+        return embedding, log_prob, mean, overdispersion, probability
 
 class ZeroInflatedNegativeBinomialLoss(nn.Module):
     def __init__(self, stability=1e-256):
@@ -175,7 +176,7 @@ class Modeling():
         self.model.to(device)
         torch.compile(self.model, mode="reduce-overhead", dynamic=True)
 
-        self.criterion_classification = nn.CrossEntropyLoss()
+        self.criterion_classification = nn.NLLLoss()
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
 
         self.images = None
@@ -190,6 +191,7 @@ class Modeling():
         self.f1_macro = None
         self.adata_actual = None
         self.adata_reconstructed = None
+        self.corr = None
         self.adata_inferred = None
 
         self.load()
@@ -197,7 +199,7 @@ class Modeling():
 
     def load(self):
         weights_file = self.directory + f"models/weights_{self.stem_file}_{self.cell_type}.pth"
-        if not os.path.isfile(weights_file) or self.mode=='train':
+        if (not os.path.isfile(weights_file)) or self.mode=='train':
             optimizer = torch.optim.AdamW(
                 list(self.model.reconstructor.parameters()) + list(self.model.classifier.parameters()),
                 lr=self.lr
@@ -225,9 +227,9 @@ class Modeling():
 
                     optimizer.zero_grad()
                     with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                        embedding, logit, mean, overdispersion, probability = self.model(image)
+                        embedding, log_prob, mean, overdispersion, probability = self.model(image)
 
-                        loss_classification = self.criterion_classification(logit, label)
+                        loss_classification = self.criterion_classification(log_prob, label)
                         loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
 
                         tensors = [embedding, mean, overdispersion, probability, loss_classification, loss_reconstruction]
@@ -244,7 +246,7 @@ class Modeling():
 
                         loss = loss_classification + loss_reconstruction
 
-                    del image, expression, label, embedding, logit, mean, overdispersion, probability
+                    del image, expression, label, embedding, log_prob, mean, overdispersion, probability
                     torch.cuda.empty_cache()
 
                     if escape:
@@ -292,7 +294,7 @@ class Modeling():
             gc.collect()
             torch.cuda.empty_cache()
 
-        else: 
+        elif self.mode in ['test', 'infer']: 
             print(f"Loading the weights from {weights_file} ... ", end='')
             self.model.load_state_dict(torch.load(weights_file, map_location=device))
             print("done.")
@@ -326,11 +328,11 @@ class Modeling():
                 label = label.to(device, non_blocking=True)
 
                 with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                    embedding, logit, mean, overdispersion, probability = self.model(image)
-                    prediction = torch.argmax(logit, dim=1)
+                    embedding, log_prob, mean, overdispersion, probability = self.model(image)
+                    prediction = torch.argmax(log_prob, dim=1)
 
                     if self.mode in ['train', 'test']:
-                        loss_classification = self.criterion_classification(logit, label)
+                        loss_classification = self.criterion_classification(log_prob, label)
                         loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
                         test_loss_classification += loss_classification.detach()
                         test_loss_reconstruction += loss_reconstruction.detach()
@@ -342,7 +344,7 @@ class Modeling():
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())
 
-                del image, expression, label, embedding, logit, mean, overdispersion, probability, prediction, reconstruction
+                del image, expression, label, embedding, log_prob, mean, overdispersion, probability, prediction, reconstruction
                 
         if self.mode in ['train', 'test']:
             print(f"Test Loss of classification: {test_loss_classification / len(test_loader):.5f}")
@@ -373,43 +375,45 @@ class Modeling():
         self.adata_actual = anndata.AnnData(
             X = self.expressions,
             var = pd.DataFrame(index=self.genes),
-            obs = pd.DataFrame({self.cell_type: self.labels}, index=cell_ids),
+            obs = pd.DataFrame({'cell_type_annotated': self.labels}, index=cell_ids),
             obsm = {"pixel": self.test_centroids, "spatial": self.test_spatials},
         )
-        self.adata_actual.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
+        self.adata_actual.uns['cell_type_annotated_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
 
         self.adata_reconstructed = anndata.AnnData(
             X = self.reconstructions,
             var = pd.DataFrame(index=self.gene_panel),
-            obs = pd.DataFrame({self.cell_type: self.predictions}, index=cell_ids),
+            obs = pd.DataFrame({'cell_type_predicted': self.predictions}, index=cell_ids),
             obsm = {"pixel": self.test_centroids, "spatial": self.test_spatials},
         )
-        self.adata_reconstructed.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
+        self.adata_reconstructed.uns['cell_type_predicted_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
         self.adata_reconstructed.obsm['embeddings'] = self.embeddings
 
-        self.adata_actual.write_h5ad(self.directory + f"results/adata_actual_{self.stem_file}_{self.cell_type}.h5ad")
-        self.adata_reconstructed.write_h5ad(self.directory + f"results/adata_reconstructed_{self.stem_file}_{self.cell_type}.h5ad")
+        common_genes = sorted(list(set(self.adata_actual.var_names) & set(self.adata_reconstructed.var_names)))
+        self.corr = np.array([np.corrcoef(
+            np.ravel(self.adata_actual[:, gene].X.toarray()),
+            np.ravel(self.adata_reconstructed[:, gene].X.toarray()),
+        )[0, 1] for gene in common_genes])
+        self.corr = pd.DataFrame(self.corr, index=common_genes, columns=['Pearson_R']).sort_values(by='Pearson_R', ascending=False).dropna()
+
+        self.adata_actual.write_h5ad(self.directory + f"results/adata_actual_{self.stem_file}.h5ad")
+        self.adata_reconstructed.write_h5ad(self.directory + f"results/adata_reconstructed_{self.stem_file}.h5ad")
 
     def draw(self):
         adata_actual = self.adata_actual.copy()
         sc.pp.normalize_total(adata_actual, target_sum=1e4)
         sc.pp.log1p(adata_actual)
-        sc.tl.rank_genes_groups(adata_actual, groupby=self.cell_type, method='wilcoxon')
+        sc.tl.rank_genes_groups(adata_actual, groupby='cell_type_annotated', method='wilcoxon')
 
-        adata_reconstructed = self.adata_reconstructed
+        adata_reconstructed = self.adata_reconstructed.copy()
         sc.pp.normalize_total(adata_reconstructed, target_sum=1e4)
         sc.pp.log1p(adata_reconstructed)
-        sc.tl.rank_genes_groups(adata_reconstructed, groupby=self.cell_type, method='wilcoxon')
-
-#        corr = np.array([np.corrcoef(
-#            np.ravel(self.adata_actual.X[:, i]),
-#            np.ravel(self.adata_reconstructed.X[:, i])
-#        )[0, 1] for i in range(self.adata_actual.shape[1])])
+        sc.tl.rank_genes_groups(adata_reconstructed, groupby="cell_type_predicted", method='wilcoxon')
 
         top_markers = {}
         top_markers_df = pd.DataFrame()
         for ct in self.cell_types.keys():
-            if ct in adata_actual.obs[self.cell_type].unique():
+            if ct in adata_actual.obs['cell_type_annotated'].unique():
                 df = sc.get.rank_genes_groups_df(adata_actual, group=ct).iloc[:10]
                 df[self.cell_type] = ct
                 top_markers[ct] = df["names"].values.tolist()
@@ -419,14 +423,12 @@ class Modeling():
         fontsize = 20
         fontweight = 'bold'
 
-#        fig = plt.figure(figsize=(14, 12))
-        fig = plt.figure(figsize=(13, 12))
-#        gs = GridSpec(4, 4, figure=fig, width_ratios=(5, 5, 3, 3), height_ratios=(6, 0.01, 5, 5), hspace=0.6, wspace=0.4)
-        gs = GridSpec(4, 3, figure=fig, width_ratios=(5, 5, 2), height_ratios=(6, 0.01, 5, 5), hspace=0.6, wspace=0.4)
+        fig = plt.figure(figsize=(14, 11))
+        gs = GridSpec(4, 4, figure=fig, width_ratios=(5, 5, 2, 2), height_ratios=(6, 0.01, 5, 5), hspace=0.6, wspace=0.4)
         ax_cm = fig.add_subplot(gs[0, 0])
         ax_cm_norm = fig.add_subplot(gs[0, 1])
         ax_f1 = fig.add_subplot(gs[0, 2])
-#        ax_r = fig.add_subplot(gs[0, 3])
+        ax_r = fig.add_subplot(gs[0, 3])
         ax_actual = fig.add_subplot(gs[2, :])
         ax_reconstructed = fig.add_subplot(gs[3, :])
 
@@ -434,30 +436,30 @@ class Modeling():
         ax_cm.set_xlabel('Prediction')
         ax_cm.set_ylabel('Label')
 
-        sns.heatmap(self.confusion_matrix_normalized, annot=True, fmt='.3f', ax=ax_cm_norm)
+        sns.heatmap(self.confusion_matrix_normalized, annot=True, fmt='.2f', ax=ax_cm_norm)
         ax_cm_norm.set_xlabel('Prediction')
         ax_cm_norm.set_ylabel('Label')
         ax_cm_norm.set_yticklabels([])
 
-        f1s = pd.DataFrame({'f1_weighted':[round(self.f1_weighted, 4)], 'f1_macro':[round(self.f1_macro, 4)]})
+        f1s = pd.DataFrame({'f1_weighted':[round(self.f1_weighted, 2)], 'f1_macro':[round(self.f1_macro, 2)]})
         sns.barplot(f1s, ax=ax_f1, color='gray')
         ax_f1.set_ylim(0, f1s.max(axis=None)*1.1)
         for container in ax_f1.containers:
             ax_f1.bar_label(container)
         ax_f1.tick_params(axis='x', labelrotation=90)
 
-#        sns.violinplot(corr, ax=ax_r, color='gray')
-#        for l in ax_r.lines[2::3]: #median
-#            x, y = l.get_data()
-#            ax_r.text(x[0]+0.04, y[0]+0.04, f'{y[0]:.3f}', color='white')
+        sns.violinplot(self.corr, ax=ax_r, color='gray', split=True, hue_order=[False, True])
+        for l in ax_r.lines[2::3]:
+            x, y = l.get_data()
+            if len(x) > 0 and len(y) > 0:
+                ax_r.text(x[0] - 0.1, y[0], f'{y[0]:.2f}', ha='right', va='center', color='white')
 
         sc.pl.rank_genes_groups_dotplot(adata_actual, var_names=top_markers, show=False, use_raw=False, dendrogram=False, var_group_rotation=0, ax=ax_actual)
         ax_actual.set_title("Actual")
         sc.pl.rank_genes_groups_dotplot(adata_reconstructed, var_names=top_markers, show=False, use_raw=False, dendrogram=False, var_group_rotation=0, ax=ax_reconstructed)
         ax_reconstructed.set_title("Reconstructed")
 
-#        axes = [ax_cm, ax_cm_norm, ax_f1, ax_r, ax_actual, ax_reconstructed]
-        axes = [ax_cm, ax_cm_norm, ax_f1, ax_actual, ax_reconstructed]
+        axes = [ax_cm, ax_cm_norm, ax_f1, ax_r, ax_actual, ax_reconstructed]
         labels = [chr(ord('A') + i) for i in range(len(axes))]
         for ax_item, label in zip(axes, labels):
             ax_item.text(0, 1, label, transform=ax_item.transAxes, fontsize=fontsize, fontweight=fontweight, va='bottom', ha='right')
@@ -480,15 +482,15 @@ class Modeling():
                 cell_ids.extend(cell_id)
                 image = image.to(device, non_blocking=True)
                 with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-                    embedding, logit, mean, overdispersion, probability = self.model(image)
+                    embedding, log_prob, mean, overdispersion, probability = self.model(image)
                 embeddings.append(embedding.detach().cpu())
-                prediction_probability, prediction = torch.max(torch.softmax(logit, dim=1), dim=1)
+                prediction_probability, prediction = torch.max(log_prob, dim=1)
                 prediction[prediction_probability < 0.9] = -1
                 predictions.append(prediction.detach().cpu())
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())
 
-                del image, embedding, logit, mean, overdispersion, probability
+                del image, embedding, log_prob, mean, overdispersion, probability
 
         embeddings = torch.cat(embeddings).numpy()
         predictions = torch.cat(predictions).numpy()

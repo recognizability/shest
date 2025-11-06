@@ -359,8 +359,6 @@ class Load(Images): #for a single dataset
         image = self.images[i]
         expression = self.expressions[i]
         label = self.labels[i]
-#        centroids = self.centroids[i]
-#        return cell_id, image, expression, label, centroids
         return cell_id, image, expression, label
 
     def loader(self):

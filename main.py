@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("--cell_type", type=str, default="cell_type", help="Cell type to consider")
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
     parser.add_argument("--save_image", action="store_true", help="Force saving images")
-    parser.add_argument("--batch_size", type=int, default=1024, help="Batch size of data loader")
+    parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
     parser.add_argument("--split", type=float, default=0.8, help="spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
