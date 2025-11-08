@@ -434,11 +434,11 @@ class Modeling():
 
         sns.heatmap(self.confusion_matrix, annot=True, fmt='d', ax=ax_cm)
         ax_cm.set_xlabel('Prediction')
-        ax_cm.set_ylabel('Label')
+        ax_cm.set_ylabel('Annotation')
 
         sns.heatmap(self.confusion_matrix_normalized, annot=True, fmt='.2f', ax=ax_cm_norm)
         ax_cm_norm.set_xlabel('Prediction')
-        ax_cm_norm.set_ylabel('Label')
+        ax_cm_norm.set_ylabel('Annotation')
         ax_cm_norm.set_yticklabels([])
 
         f1s = pd.DataFrame({'f1_weighted':[round(self.f1_weighted, 2)], 'f1_macro':[round(self.f1_macro, 2)]})

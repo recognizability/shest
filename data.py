@@ -52,7 +52,7 @@ class Preprocessing():
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
         adata_raw = self.sdata.tables['table']
-        self.adata = adata_raw[:, adata_raw.var_names.isin(config.gene_panel)].copy() 
+        self.adata = adata_raw.copy() 
         self.adata.obs.index = self.adata.obs['cell_id']
 
         self.processing_directory = self.directory + 'dataset/' + self.stem_directory
@@ -440,7 +440,7 @@ class Dataset(): #for multiple datasets and augmentation
         self.test_spatials = self.spatials[self.test_indices]
 
     def _augment(self):
-        max_count = max(len(indices) for indices in self.train_class_indices.values())
+        tumor_count = len(self.train_class_indices['Tumor_cell_LUAD'])
         angles = [0, 90, 180, 270]
         flips = [None, "h", "v", "hv"]
         rng = np.random.default_rng(seed)
@@ -452,9 +452,13 @@ class Dataset(): #for multiple datasets and augmentation
 
         print("Augmenting the training dataset ...")
         for c, indices in tqdm(self.train_class_indices.items()):
-            repeat = max_count // len(indices)
-            remain = max_count % len(indices)
-            expanded_indices = indices * repeat + indices[:remain]
+            if len(indices) > tumor_count:
+                expanded_indices = rng.choice(indices, tumor_count, replace=False)
+            else:
+                repeat = tumor_count // len(indices)
+                remain = tumor_count % len(indices)
+                expanded_indices = indices * repeat + indices[:remain]
+
             for i in expanded_indices:
                 cell_id = self.cell_ids[i]
                 image = self.images[i]
