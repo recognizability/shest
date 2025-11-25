@@ -51,8 +51,7 @@ class Preprocessing():
         self.sdata = self._prepare_sdata()
         self.affine = get_transformation(self.sdata.images['he_image']).to_affine_matrix(input_axes=('x', 'y'), output_axes=('x', 'y'))
         self.nucleus_boundaries = self.sdata.shapes["nucleus_boundaries"]
-        adata_raw = self.sdata.tables['table']
-        self.adata = adata_raw.copy() 
+        self.adata = self.sdata.tables['table']
         self.adata.obs.index = self.adata.obs['cell_id']
 
         self.processing_directory = self.directory + 'dataset/' + self.stem_directory

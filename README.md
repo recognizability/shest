@@ -1,5 +1,5 @@
 # SHEST
-Single-cell-level artificial Intelligence from hematoxylin and eosin morphology for spatial transcriptomics reconstruction and cell type prediction
+Single-cell-level artificial intelligence from haematoxylin and eosin morphology for cell type prediction and spatial transcriptomics reconstruction
 
 ## Prerequisites
 
@@ -39,6 +39,6 @@ options:
                         Batch size of data loader (default: 512)
   --split SPLIT         spit ratio for training dataset (default: 0.8)
   --epochs EPOCHS       Number of epochs in training (default: 40)
-  --lr LR               Learning rate of optimizer (default: 0.01)
+  --lr LR               Learning rate of optimiser (default: 0.01)
   --mode MODE           train, test or infer (default: test)
 ```

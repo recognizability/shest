@@ -23,7 +23,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
     parser.add_argument("--split", type=float, default=0.8, help="spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
-    parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimizer")
+    parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimiser")
     parser.add_argument("--mode", type=str, default="test", help="train, test or infer")
     args = parser.parse_args()
 
