@@ -47,12 +47,9 @@ options:
 ```
 python main.py --mode train
 ```
-The `he_annotation.csv` file must be located in the `DIRECTORY/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the following schema:
-```
-cell_id,group
-```
+The cell type annotation file `he_annotation.csv` must be located under the `DIRECTORY/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the schema `cell_id,group`.
 
 ### Command for test
 ```
-python main.py --platform Xenium_V1 --sample Human_Lung_Cancer_Addon
+python main.py
 ```
