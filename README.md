@@ -42,3 +42,17 @@ options:
   --lr LR               Learning rate of optimiser (default: 0.01)
   --mode MODE           train, test or infer (default: test)
 ```
+
+### Command for training
+```
+python main.py --mode train
+```
+The `he_annotation.csv` file must be located in the `DIRECTORY/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the following schema:
+```
+cell_id,group
+```
+
+### Command for test
+```
+python main.py --platform Xenium_V1 --sample Human_Lung_Cancer_Addon
+```

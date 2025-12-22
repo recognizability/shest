@@ -44,8 +44,8 @@ cell_types = { #cell subtypes from CZ CELLxGENE Discover
             'Tumor cells LUAD NE',
             'Tumor cells LUAD mitotic',
         ],
-        "Macrophage": [
-            "Macrophage",
+        'Macrophage': [
+            'Macrophage',
         ],
         'Endothelial_cell': [
             'Endothelial cell arterial',
