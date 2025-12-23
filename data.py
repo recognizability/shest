@@ -262,8 +262,10 @@ class Preprocessing():
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')
 
 class Images(): #for only images
-    def __init__(self, args, images_raw, cell_ids=None):
+    def __init__(self, args, pixel_size, centroids, images_raw, cell_ids=None):
         self.batch_size = args.batch_size
+        self.pixel_size = pixel_size
+        self.centroids = centroids
         self.images_raw = images_raw
         self.cell_ids = list(self.images_raw.keys()) if cell_ids is None else cell_ids
         self.images = self._tensor()

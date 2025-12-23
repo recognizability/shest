@@ -145,25 +145,26 @@ class Modeling():
         self.palette = self.palette_subtype if self.cell_type == 'cell_subtype_expression' else self.palette_type
         self.gene_panel = config.gene_panel
         self.n_genes = len(self.gene_panel)
-        self.genes = data_object.genes
-
-        if 0 < args.split < 1:
-            self.train_loader, self.test_loader = data_object.loader()
-            self.stem_file = data_object.stem_file
-            self.test_centroids = data_object.test_centroids
-            self.test_spatials = data_object.test_spatials
-        else:
-            self.test_loader = data_object.loader()
-            self.stem_file = args.platform
-            for source, sample in zip(args.sources, args.samples, strict=True):
-                self.stem_file += f"_{source}_{sample}"
-            self.test_centroids = data_object.centroids
-            self.test_spatials = data_object.spatial
+        self.genes = getattr(data_object, 'genes', config.gene_panel)
 
         if isinstance(data_object, Dataset):
             self.pixel_sizes = data_object.pixel_sizes
         else:
             self.pixel_sizes = [data_object.pixel_size]
+
+        if hasattr(args, 'split') and 0 < args.split < 1:
+            self.train_loader, self.test_loader = data_object.loader()
+            self.stem_file = data_object.stem_file
+            self.centroids = data_object.test_centroids
+            self.spatial = data_object.test_spatials
+        else:
+            self.test_loader = data_object.loader()
+            self.stem_file = args.platform
+            for source, sample in zip(args.sources, args.samples, strict=True):
+                self.stem_file += f"_{source}_{sample}"
+            self.centroids = data_object.centroids
+            spatial = np.round(self.centroids * self.pixel_sizes[0]).astype(int)
+            self.spatial = getattr(data_object, 'spatial', spatial)
 
         self.label_encoder = config.label_encoder
         self.classes = config.classes
@@ -195,7 +196,8 @@ class Modeling():
         self.adata_inferred = None
 
         self.load()
-        self.validate()
+        if args.mode != 'infer':
+            self.validate()
 
     def load(self):
         weights_file = self.directory + f"models/weights_{self.stem_file}_{self.cell_type}.pth"
@@ -376,7 +378,7 @@ class Modeling():
             X = self.expressions,
             var = pd.DataFrame(index=self.genes),
             obs = pd.DataFrame({'cell_type_annotated': self.labels}, index=cell_ids),
-            obsm = {"pixel": self.test_centroids, "spatial": self.test_spatials},
+            obsm = {"pixel": self.centroids, "spatial": self.spatial},
         )
         self.adata_actual.uns['cell_type_annotated_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
 
@@ -384,7 +386,7 @@ class Modeling():
             X = self.reconstructions,
             var = pd.DataFrame(index=self.gene_panel),
             obs = pd.DataFrame({'cell_type_predicted': self.predictions}, index=cell_ids),
-            obsm = {"pixel": self.test_centroids, "spatial": self.test_spatials},
+            obsm = {"pixel": self.centroids, "spatial": self.spatial},
         )
         self.adata_reconstructed.uns['cell_type_predicted_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
         self.adata_reconstructed.obsm['embeddings'] = self.embeddings
@@ -485,7 +487,7 @@ class Modeling():
                     embedding, log_prob, mean, overdispersion, probability = self.model(image)
                 embeddings.append(embedding.detach().cpu())
                 prediction_probability, prediction = torch.max(log_prob, dim=1)
-                prediction[prediction_probability < 0.9] = -1
+#                prediction[prediction_probability < 0.9] = -1
                 predictions.append(prediction.detach().cpu())
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())
@@ -499,19 +501,17 @@ class Modeling():
         gc.collect()
         torch.cuda.empty_cache()
 
-        spatial = np.round(self.centroids * self.pixel_sizes[0]).astype(int)
-
         mask = predictions == -1
         predictions_masked = np.empty(predictions.shape, dtype=object)
         predictions_masked[mask] = np.nan
         predictions_masked[~mask] = self.label_encoder.inverse_transform(predictions[~mask])
-        self.adata = anndata.AnnData(
+        self.adata_inferred = anndata.AnnData(
             X = reconstructions,
             var = pd.DataFrame(index=self.gene_panel),
             obs = pd.DataFrame({self.cell_type: predictions_masked}, index=cell_ids),
-            obsm = {"pixel": self.centroids, "spatial": spatial},
+            obsm = {"pixel": self.centroids, "spatial": self.spatial},
         )
-        self.adata.obs[self.cell_type] = pd.Categorical(self.adata.obs[self.cell_type], categories=self.cell_types.keys(), ordered=True)
-        self.adata.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
-        self.adata.obsm['embeddings'] = embeddings
-        self.adata.write_h5ad(self.directory + f"results/adata_inferred_{self.stem_file}_{self.cell_type}.h5ad")
+        self.adata_inferred.obs[self.cell_type] = pd.Categorical(self.adata_inferred.obs[self.cell_type], categories=self.cell_types.keys(), ordered=True)
+        self.adata_inferred.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
+        self.adata_inferred.obsm['embeddings'] = embeddings
+        self.adata_inferred.write_h5ad(self.directory + f"results/adata_inferred_{self.stem_file}_{self.cell_type}.h5ad")
