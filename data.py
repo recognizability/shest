@@ -207,9 +207,7 @@ class Preprocessing():
                 null = np.zeros_like(transposed[:, :, 0])
                 hematoxylin_transposed = hed2rgb(np.stack((hed[:, :, 0], null, null), axis=-1))
                 hematoxylin = torch.from_numpy((hematoxylin_transposed * 255).astype(np.uint8)).permute(2, 0, 1).float()
-                hematoxylin = F.interpolate(hematoxylin.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
                 hematoxylin_masked = hematoxylin * mask
-                hematoxylin_masked = F.interpolate(hematoxylin_masked.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
 
                 self.images[cell_id] = torch.cat([
                     torch.cat([window_image, window_image_masked], dim=2),
@@ -265,24 +263,28 @@ class Images(): #for only images
     def __init__(self, args, pixel_size, centroids, images_raw, cell_ids=None):
         self.batch_size = args.batch_size
         self.pixel_size = pixel_size
-        self.centroids = centroids
+        self.centroids_raw = centroids
         self.images_raw = images_raw
-        self.cell_ids = list(self.images_raw.keys()) if cell_ids is None else cell_ids
-        self.images = self._tensor()
+        self.cell_ids = sorted(list(set(self.images_raw.keys() & set(self.images_raw.keys())))) if cell_ids is None else cell_ids
+        self.images, self.centroids = self._dataset()
 
-    def _tensor(self):
+    def _dataset(self):
         images = []
+        centroids = []
         print("Making the images into tensors ...", end='')
         for cell_id in tqdm(self.cell_ids):
             image = self.images_raw[cell_id]
             images.append(image.unsqueeze(0))
+            centroids.append(self.centroids_raw[cell_id])
         images = torch.cat(images, dim=0).contiguous()
         images.div_(255.0)
         mean = torch.tensor([0.707223, 0.578729, 0.703617]).view(1, 3, 1, 1) #from H-optimus-0
         std = torch.tensor([0.211883, 0.230117, 0.177517]).view(1, 3, 1, 1) #from H-optimus-0
         images.sub_(mean).div_(std)
         print(images.shape, "images tensor is made.")
-        return images
+        centroids = np.array(centroids)
+        print(centroids.shape, "centroids array is made.")
+        return images, centroids
 
     def __len__(self):
         return len(self.cell_ids)
