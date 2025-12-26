@@ -196,8 +196,10 @@ class Modeling():
         self.adata_inferred = None
 
         self.load()
-        if args.mode != 'infer':
+        if args.mode in ['train', 'test']:
             self.validate()
+        elif args == 'infer':
+            self.infer()
 
     def load(self):
         weights_file = self.directory + f"models/weights_{self.stem_file}_{self.cell_type}.pth"
