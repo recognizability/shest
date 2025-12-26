@@ -16,7 +16,6 @@ from skimage.color import rgb2hed, hed2rgb
 import scanpy as sc
 import spatialdata as sd
 from spatialdata.transformations import get_transformation
-import spatialdata_plot
 from spatialdata_io import xenium
 import tacco as tc
 
