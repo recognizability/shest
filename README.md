@@ -5,10 +5,9 @@ Single-cell-level artificial intelligence from haematoxylin and eosin morphology
 
 |Package|Version|
 |---|---|
-|numpy|2.2.6|
-|scanpy|1.11.5|
-|spatialdata|0.6.1|
-|torch|2.5.1|
+|scanpy|1.10.4|
+|spatialdata|0.3.0|
+|torch|2.6.0+cu124|
 
 ## Execution
 
