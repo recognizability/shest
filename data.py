@@ -260,10 +260,10 @@ class Preprocessing():
         self.adata.write(self.processing_directory + f'annotation/adata.h5ad')
 
 class Images(): #for only images
-    def __init__(self, args, pixel_size, centroids, images_raw, cell_ids=None):
+    def __init__(self, args, pixel_size, centroids_raw, images_raw, cell_ids=None):
         self.batch_size = args.batch_size
         self.pixel_size = pixel_size
-        self.centroids_raw = centroids
+        self.centroids_raw = centroids_raw
         self.images_raw = images_raw
         self.cell_ids = sorted(list(set(self.images_raw.keys() & set(self.images_raw.keys())))) if cell_ids is None else cell_ids
         self.images, self.centroids = self._dataset()
@@ -336,13 +336,13 @@ class Load(Images): #for a single dataset
             centroids[cell_id] = centroids_raw[cell_id]
         self.centroids = np.vstack(list(centroids.values()))
 
-        super().__init__(args, self.images, self.cell_ids)
-
         self.image = preprocessed.image
         self.width = preprocessed.width
         self.height = preprocessed.height
         self.exteriors = preprocessed.exteriors
         self.pixel_size = preprocessed.pixel_size
+
+        super().__init__(args, self.pixel_size, centroids_raw, self.images, self.cell_ids)
 
         self.adata = self.adata_raw[self.cell_ids, :].copy()
         self.spatial = self.adata.obsm['spatial']

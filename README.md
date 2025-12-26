@@ -5,9 +5,9 @@ Single-cell-level artificial intelligence from haematoxylin and eosin morphology
 
 |Package|Version|
 |---|---|
-|scanpy|1.10.4|
-|spatialdata|0.3.0|
-|torch|2.6.0+cu124|
+|scanpy|1.11.5|
+|spatialdata|0.6.1|
+|torch|2.5.1|
 
 ## Execution
 
@@ -27,9 +27,9 @@ options:
                         Working directory (default: /data0/crp/)
   --platform PLATFORM   Platform of spatial transcriptomics (default: Xenium_Prime)
   --sources SOURCES [SOURCES ...]
-                        Data sources (default: ['10X'])
+                        Data sources (default: ['10X', 'SMC', 'SMC'])
   --samples SAMPLES [SAMPLES ...]
-                        Sample names (default: ['Human_Lung_Cancer'])
+                        Sample names (default: ['Human_Lung_Cancer', '03320', '03331'])
   --organ ORGAN         Organ of the sample (default: lung)
   --cell_type CELL_TYPE
                         Cell type to consider (default: cell_type)

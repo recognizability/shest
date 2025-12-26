@@ -466,7 +466,8 @@ class Modeling():
         for ax_item, label in zip(axes, labels):
             ax_item.text(0, 1, label, transform=ax_item.transAxes, fontsize=fontsize, fontweight=fontweight, va='bottom', ha='right')
 
-        plt.savefig(self.directory + f"results/evaluation_{self.stem_file}_{self.cell_type}.png", bbox_inches="tight")
+        dpi=300
+        plt.savefig(self.directory + f"results/evaluation_{self.stem_file}_{self.cell_type}_dpi{dpi}.png", bbox_inches="tight", dpi=dpi)
 
     def infer(self, test_loader=None):
         if test_loader is None:
