@@ -198,7 +198,7 @@ class Modeling():
         self.load()
         if args.mode == 'train':
             self.validate()
-        elif args == 'infer':
+        elif args.mode == 'infer':
             self.infer()
 
     def load(self):
