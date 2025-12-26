@@ -196,7 +196,7 @@ class Modeling():
         self.adata_inferred = None
 
         self.load()
-        if args.mode == 'train':
+        if args.mode in ['train', 'test']:
             self.validate()
         elif args.mode == 'infer':
             self.infer()
