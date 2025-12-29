@@ -318,7 +318,7 @@ class Modeling():
         gc.collect()
         torch.cuda.empty_cache()
 
-        if self.mode in ['train', 'test']:
+        if self.mode == 'train':
             test_loss_reconstruction = 0
             test_loss_classification = 0
 
@@ -335,7 +335,7 @@ class Modeling():
                     embedding, log_prob, mean, overdispersion, probability = self.model(image)
                     prediction = torch.argmax(log_prob, dim=1)
 
-                    if self.mode in ['train', 'test']:
+                    if self.mode == 'train':
                         loss_classification = self.criterion_classification(log_prob, label)
                         loss_reconstruction = self.criterion_reconstruction(mean, overdispersion, probability, expression)
                         test_loss_classification += loss_classification.detach()
@@ -350,7 +350,7 @@ class Modeling():
 
                 del image, expression, label, embedding, log_prob, mean, overdispersion, probability, prediction, reconstruction
                 
-        if self.mode in ['train', 'test']:
+        if self.mode == 'train':
             print(f"Test Loss of classification: {test_loss_classification / len(test_loader):.5f}")
             print(f"Test Loss of reconstruction: {test_loss_reconstruction / len(test_loader):.5f}")
 
