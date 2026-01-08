@@ -25,8 +25,7 @@ def set_args(argv=None):
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimiser")
     parser.add_argument("--mode", type=str, default="test", help="Choose between train, test or infer")
-    parser.add_argument("--cutoff", type=float, default=0.0, help="Lower bound of prediction probability")
-#    args = parser.parse_args()
+    parser.add_argument("--cutoff", type=float, default=0.9, help="Lower bound of prediction probability")
     args, remaining = parser.parse_known_args(argv)
     return args, remaining
 

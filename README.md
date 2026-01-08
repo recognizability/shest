@@ -16,7 +16,9 @@ Single-cell-level artificial intelligence from haematoxylin and eosin morphology
 ```
 python he.py --wsi {svs file path}
 ```
+At this point, Cellpose is used for nuclear segmentation. The output files are `h5ad` files with cell-level expression reconstruction and type prediction, and `png` files with nuclear boundaries colored.
 
+## Advanced usage
 * Command for model training
 ```
 python main.py --mode train

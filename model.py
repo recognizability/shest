@@ -493,7 +493,7 @@ class Modeling():
                     embedding, log_prob, mean, overdispersion, probability = self.model(image)
                 embeddings.append(embedding.detach().cpu())
                 prediction_probability, prediction = torch.max(log_prob, dim=1)
-                prediction[prediction_probability < self.cutoff] = -1
+                prediction[prediction_probability.exp() < self.cutoff] = -1
                 predictions.append(prediction.detach().cpu())
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())

@@ -52,24 +52,24 @@ print("Making it to a image array ...", end=' ')
 image = np.array(image_raw)[:, :, :3]
 print("done.")
 
+masks_file = path_stem + "_masks.npy"
+if not os.path.exists(masks_file):
+    model = models.CellposeModel(gpu=True)
+    print("Segmenting the nuclei of cells ...", end=' ')
+    masks, flows, styles = model.eval(image)
+    np.save(masks_file, masks)
+    print("done.")
+else:
+    print("Loading the segmentation masks ...", end=' ')
+    masks = np.load(masks_file)
+    print("done.")
+
+regions = regionprops(masks)
+print(len(regions), "cell masks are prepared.")
+
 images_file = path_stem + "_images.pkl"
 centroids_file = path_stem + "_centroids.pkl"
 if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)):
-    masks_file = path_stem + "_masks.npy"
-    if not os.path.exists(masks_file):
-        model = models.CellposeModel(gpu=True)
-        print("Segmenting the nuclei of cells ...", end=' ')
-        masks, flows, styles = model.eval(image)
-        np.save(masks_file, masks)
-        print("done.")
-    else:
-        print("Loading the segmentation masks ...", end=' ')
-        masks = np.load(masks_file)
-        print("done.")
-
-    regions = regionprops(masks)
-    print(len(regions), "cell masks are prepared.")
-
     images = {}
     centroids = {}
     for region in tqdm(regions):
