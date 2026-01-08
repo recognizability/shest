@@ -12,7 +12,7 @@ Single-cell-level artificial intelligence from haematoxylin and eosin morphology
 |timm|1.0.15|
 
 ## Execution
-* command for a WSI file
+* Command to infer from a WSI file
 ```
 python he.py --wsi {svs file path}
 ```
