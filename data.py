@@ -28,12 +28,16 @@ from config import n_cores, generator, seed, side, tile, lower_micrometer, upper
 
 sc.settings.n_jobs = n_cores
 
-def quadruple_tile(window_image, polygon_shifted):
+def quadruple_tile(window_image, polygon_shifted, upper=None):
     window_image = torch.from_numpy(window_image).float()
     window_image = F.interpolate(window_image.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
 
     mask = polygon2mask(window_image.shape[1:], polygon_shifted)
     mask = torch.from_numpy(mask).unsqueeze(0).float()
+    if upper:
+        mask = F.interpolate(mask.unsqueeze(0), size=int(round(tile * window_image.shape[1] / upper)), mode="bilinear", align_corners=False).squeeze(0)
+        mask = mask[:, :tile, :tile]
+
     window_image_masked = window_image * mask
 
     transposed = window_image.numpy().transpose(1, 2, 0).astype(np.uint8)
@@ -211,8 +215,8 @@ class Preprocessing():
 
                 window_image = self.image[:, y_lower:y_upper, x_left:x_right].copy()
                 polygon_shifted = [(
-                    int(round(tile*(y_coord - y_lower) / upper)),
-                    int(round(tile*(x_coord - x_left) / upper)),
+                    int(round(tile * (y_coord - y_lower) / upper)),
+                    int(round(tile * (x_coord - x_left) / upper)),
                 ) for x_coord, y_coord in polygon.coords]
                 self.images[cell_id] = quadruple_tile(window_image, polygon_shifted)
                 centroids[cell_id] = torch.tensor([x_centroid, y_centroid])
