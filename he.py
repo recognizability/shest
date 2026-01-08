@@ -70,7 +70,6 @@ lower = int(math.ceil(lower_micrometer / pixel_size))
 upper = int(math.ceil(upper_micrometer / pixel_size))
 half = upper // 2
 
-coords = region.coords.astype(np.int32)
 images = {}
 centroids = {}
 for region in tqdm(regions):
@@ -90,6 +89,7 @@ for region in tqdm(regions):
     except:
         continue
 
+    coords = region.coords.astype(np.int32)
     polygon_shifted = np.array([[
         int(round(tile*(y_coord - y_lower) / upper)), 
         int(round(tile*(x_coord - x_left) / upper))
