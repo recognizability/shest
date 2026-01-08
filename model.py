@@ -24,8 +24,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.gridspec import GridSpec
 
-from config import n_cores, seed, set_seed, generator, device
+from config import n_cores, generator, device
 from data import Load, Dataset
+
+plt.rcParams['savefig.dpi'] = 300
 
 sc.settings.n_jobs = n_cores
 in_features = 1536 #output features of H-optimus-0
@@ -179,6 +181,8 @@ class Modeling():
 
         self.criterion_classification = nn.NLLLoss()
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
+
+        self.cutoff = args.cutoff
 
         self.images = None
         self.expressions = None
@@ -489,7 +493,7 @@ class Modeling():
                     embedding, log_prob, mean, overdispersion, probability = self.model(image)
                 embeddings.append(embedding.detach().cpu())
                 prediction_probability, prediction = torch.max(log_prob, dim=1)
-#                prediction[prediction_probability < 0.9] = -1
+                prediction[prediction_probability < self.cutoff] = -1
                 predictions.append(prediction.detach().cpu())
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())

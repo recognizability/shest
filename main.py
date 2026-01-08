@@ -2,11 +2,11 @@ import argparse
 import pprint
 import torch
 
-from config import seed, set_seed, Config
+from config import Config
 from data import Dataset
 from model import Modeling
 
-if __name__ == "__main__":
+def set_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Sample information and hyperparameters",                             
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -21,12 +21,17 @@ if __name__ == "__main__":
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
     parser.add_argument("--save_image", action="store_true", help="Force saving images")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
-    parser.add_argument("--split", type=float, default=0.8, help="spit ratio for training dataset")
+    parser.add_argument("--split", type=float, default=0.8, help="Spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimiser")
-    parser.add_argument("--mode", type=str, default="test", help="train, test or infer")
-    args = parser.parse_args()
+    parser.add_argument("--mode", type=str, default="test", help="Choose between train, test or infer")
+    parser.add_argument("--cutoff", type=float, default=0.0, help="Lower bound of prediction probability")
+#    args = parser.parse_args()
+    args, remaining = parser.parse_known_args(argv)
+    return args, remaining
 
+if __name__ == "__main__":
+    args, _ = set_args()
     config = Config(args)
     dataset = Dataset(args, config)
     modeling = Modeling(args, config, dataset)

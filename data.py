@@ -24,9 +24,29 @@ import torch.nn.functional as F
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, random_split, Subset
 
-from config import n_cores, generator, seed, set_seed, side, tile, lower_micrometer, upper_micrometer
+from config import n_cores, generator, seed, side, tile, lower_micrometer, upper_micrometer
 
 sc.settings.n_jobs = n_cores
+
+def quadruple_tile(window_image, polygon_shifted):
+    window_image = torch.from_numpy(window_image).float()
+    window_image = F.interpolate(window_image.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
+
+    mask = polygon2mask(window_image.shape[1:], polygon_shifted)
+    mask = torch.from_numpy(mask).unsqueeze(0).float()
+    window_image_masked = window_image * mask
+
+    transposed = window_image.numpy().transpose(1, 2, 0).astype(np.uint8)
+    hed = rgb2hed(transposed)
+    null = np.zeros_like(transposed[:, :, 0])
+    hematoxylin_transposed = hed2rgb(np.stack((hed[:, :, 0], null, null), axis=-1))
+    hematoxylin = torch.from_numpy((hematoxylin_transposed * 255).astype(np.uint8)).permute(2, 0, 1).float()
+    hematoxylin_masked = hematoxylin * mask
+
+    return torch.cat([
+        torch.cat([window_image, window_image_masked], dim=2),
+        torch.cat([hematoxylin, hematoxylin_masked], dim=2)
+    ], dim=1)
 
 class Preprocessing():
     def __init__(self, args, config, source, sample):
@@ -190,29 +210,13 @@ class Preprocessing():
                     continue
 
                 window_image = self.image[:, y_lower:y_upper, x_left:x_right].copy()
-                window_image = torch.from_numpy(window_image).float()
-                window_image = F.interpolate(window_image.unsqueeze(0), size=tile, mode="bilinear", align_corners=False).squeeze(0)
-
                 polygon_shifted = [(
-                    int(round(tile*(y - y_lower)/upper)),
-                    int(round(tile*(x - x_left)/upper)),
-                ) for x, y in polygon.coords]
-                mask = polygon2mask(window_image.shape[1:], polygon_shifted)
-                mask = torch.from_numpy(mask).unsqueeze(0).float()
-                window_image_masked = window_image * mask
-
-                transposed = window_image.numpy().transpose(1, 2, 0).astype(np.uint8)
-                hed = rgb2hed(transposed)
-                null = np.zeros_like(transposed[:, :, 0])
-                hematoxylin_transposed = hed2rgb(np.stack((hed[:, :, 0], null, null), axis=-1))
-                hematoxylin = torch.from_numpy((hematoxylin_transposed * 255).astype(np.uint8)).permute(2, 0, 1).float()
-                hematoxylin_masked = hematoxylin * mask
-
-                self.images[cell_id] = torch.cat([
-                    torch.cat([window_image, window_image_masked], dim=2),
-                    torch.cat([hematoxylin, hematoxylin_masked], dim=2)
-                ], dim=1)
+                    int(round(tile*(y_coord - y_lower) / upper)),
+                    int(round(tile*(x_coord - x_left) / upper)),
+                ) for x_coord, y_coord in polygon.coords]
+                self.images[cell_id] = quadruple_tile(window_image, polygon_shifted)
                 centroids[cell_id] = torch.tensor([x_centroid, y_centroid])
+
             self.centroids = centroids
 
             print("Saving the images and centroids ...", end=' ')

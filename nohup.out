@@ -2826,3 +2826,113 @@ Traceback (most recent call last):
     if torch._C._dispatch_has_kernel_for_dispatch_key(self.qualname, "Meta"):
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 RuntimeError: operator torchvision::nms does not exist
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/dask/dataframe/__init__.py:31: FutureWarning: The legacy Dask DataFrame implementation is deprecated and will be removed in a future version. Set the configuration option `dataframe.query-planning` to `True` or None to enable the new Dask Dataframe implementation and silence this warning.
+  warnings.warn(
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/xarray_schema/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import DistributionNotFound, get_distribution
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+The classes are: ['Alveolar_cell' 'Tumor_cell_LUAD' 'Macrophage' 'Endothelial_cell'
+ 'Fibroblast' 'Lymphocyte']
+Loading the sdata ... done.
+Loading the annotations ... done.
+Loading the images and centroids... done.
+268183 images are prepared.
+66584 cells are annotated by thier morphologies.
+Only the 66584 cells are annotated by the morphology and the single cell reference
+Only 66584 cells common to both annotation and area filtering are prepared.
+268183 images of the cells are prepared.
+Expression profile and their cell types loading ... (278328, 5001)
+66584 of annotated cells are loaded.
+Common 66584 cells are selected.
+Making the images into tensors ...  0%|          | 0/66584 [00:00<?, ?it/s] 62%|██████▏   | 41508/66584 [00:00<00:00, 415036.86it/s]100%|██████████| 66584/66584 [00:00<00:00, 400066.95it/s]
+version mismatch: detected: RasterFormatV02, requested: FormatV04
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+version mismatch: detected: RasterFormatV02, requested: FormatV04
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+torch.Size([66584, 3, 224, 224]) images tensor is made.
+(66584, 2) centroids array is made.
+Loading the sdata ... done.
+Loading the annotations ... done.
+Loading the images and centroids... done.
+160781 images are prepared.
+29297 cells are annotated by thier morphologies.
+Only the 29297 cells are annotated by the morphology and the single cell reference
+Only 29297 cells common to both annotation and area filtering are prepared.
+160781 images of the cells are prepared.
+Expression profile and their cell types loading ... (178000, 5001)
+29297 of annotated cells are loaded.
+Common 29297 cells are selected.
+Making the images into tensors ...  0%|          | 0/29297 [00:00<?, ?it/s]100%|██████████| 29297/29297 [00:00<00:00, 320545.63it/s]
+version mismatch: detected: RasterFormatV02, requested: FormatV04
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+version mismatch: detected: RasterFormatV02, requested: FormatV04
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/zarr/creation.py:614: UserWarning: ignoring keyword argument 'read_only'
+  compressor, fill_value = _kwargs_compat(compressor, fill_value, kwargs)
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/anndata/_core/aligned_df.py:68: ImplicitModificationWarning: Transforming to str index.
+  warnings.warn("Transforming to str index.", ImplicitModificationWarning)
+torch.Size([29297, 3, 224, 224]) images tensor is made.
+(29297, 2) centroids array is made.
+Loading the sdata ... done.
+Loading the annotations ... done.
+Loading the images and centroids... done.
+126749 images are prepared.
+46069 cells are annotated by thier morphologies.
+Only the 46069 cells are annotated by the morphology and the single cell reference
+Only 46069 cells common to both annotation and area filtering are prepared.
+126749 images of the cells are prepared.
+Expression profile and their cell types loading ... (131804, 5001)
+46069 of annotated cells are loaded.
+Common 46069 cells are selected.
+Making the images into tensors ...  0%|          | 0/46069 [00:00<?, ?it/s]100%|██████████| 46069/46069 [00:00<00:00, 500589.10it/s]
+torch.Size([46069, 3, 224, 224]) images tensor is made.
+(46069, 2) centroids array is made.
+cell_ids: 141950
+classes: {np.str_('Alveolar_cell'): 8406, np.str_('Tumor_cell_LUAD'): 15665, np.str_('Macrophage'): 6716, np.str_('Endothelial_cell'): 13965, np.str_('Fibroblast'): 18714, np.str_('Lymphocyte'): 78484}
+stem_file: Xenium_Prime_10X_Human_Lung_Cancer_SMC_03320_SMC_03331
+train_size: 113560
+test_size: 28390
+Train classes: {np.str_('Alveolar_cell'): 6690, np.str_('Tumor_cell_LUAD'): 12554, np.str_('Macrophage'): 5350, np.str_('Endothelial_cell'): 11255, np.str_('Fibroblast'): 14970, np.str_('Lymphocyte'): 62741}
+Test classes: {np.str_('Alveolar_cell'): 1716, np.str_('Tumor_cell_LUAD'): 3111, np.str_('Macrophage'): 1366, np.str_('Endothelial_cell'): 2710, np.str_('Fibroblast'): 3744, np.str_('Lymphocyte'): 15743}
+Loading the weights from /data0/crp/models/weights_Xenium_Prime_10X_Human_Lung_Cancer_SMC_03320_SMC_03331_cell_type.pth ... done.
+Validating the dataset by the model ...
+  0%|          | 0/56 [00:00<?, ?it/s]  2%|▏         | 1/56 [00:01<01:28,  1.60s/it]  4%|▎         | 2/56 [00:03<01:22,  1.52s/it]  5%|▌         | 3/56 [00:04<01:15,  1.43s/it]  7%|▋         | 4/56 [00:05<01:12,  1.39s/it]  9%|▉         | 5/56 [00:07<01:09,  1.37s/it] 11%|█         | 6/56 [00:08<01:07,  1.35s/it] 12%|█▎        | 7/56 [00:09<01:05,  1.34s/it] 14%|█▍        | 8/56 [00:11<01:04,  1.34s/it] 16%|█▌        | 9/56 [00:12<01:02,  1.34s/it] 18%|█▊        | 10/56 [00:13<01:01,  1.34s/it] 20%|█▉        | 11/56 [00:15<01:00,  1.33s/it] 21%|██▏       | 12/56 [00:16<00:58,  1.33s/it] 23%|██▎       | 13/56 [00:17<00:57,  1.33s/it] 25%|██▌       | 14/56 [00:19<00:56,  1.33s/it] 27%|██▋       | 15/56 [00:20<00:54,  1.33s/it] 29%|██▊       | 16/56 [00:21<00:53,  1.33s/it] 30%|███       | 17/56 [00:23<00:52,  1.33s/it] 32%|███▏      | 18/56 [00:24<00:50,  1.34s/it] 34%|███▍      | 19/56 [00:25<00:49,  1.34s/it] 36%|███▌      | 20/56 [00:27<00:48,  1.34s/it] 38%|███▊      | 21/56 [00:28<00:47,  1.34s/it] 39%|███▉      | 22/56 [00:29<00:45,  1.35s/it] 41%|████      | 23/56 [00:31<00:44,  1.35s/it] 43%|████▎     | 24/56 [00:32<00:43,  1.35s/it] 45%|████▍     | 25/56 [00:33<00:41,  1.35s/it] 46%|████▋     | 26/56 [00:35<00:40,  1.35s/it] 48%|████▊     | 27/56 [00:36<00:39,  1.35s/it] 50%|█████     | 28/56 [00:37<00:37,  1.34s/it] 52%|█████▏    | 29/56 [00:39<00:36,  1.34s/it] 54%|█████▎    | 30/56 [00:40<00:34,  1.34s/it] 55%|█████▌    | 31/56 [00:41<00:33,  1.35s/it] 57%|█████▋    | 32/56 [00:43<00:32,  1.35s/it] 59%|█████▉    | 33/56 [00:44<00:31,  1.35s/it] 61%|██████    | 34/56 [00:45<00:29,  1.35s/it] 62%|██████▎   | 35/56 [00:47<00:28,  1.35s/it] 64%|██████▍   | 36/56 [00:48<00:26,  1.35s/it] 66%|██████▌   | 37/56 [00:49<00:25,  1.35s/it] 68%|██████▊   | 38/56 [00:51<00:24,  1.35s/it] 70%|██████▉   | 39/56 [00:52<00:22,  1.35s/it] 71%|███████▏  | 40/56 [00:54<00:21,  1.35s/it] 73%|███████▎  | 41/56 [00:55<00:20,  1.35s/it] 75%|███████▌  | 42/56 [00:56<00:18,  1.35s/it] 77%|███████▋  | 43/56 [00:58<00:17,  1.35s/it] 79%|███████▊  | 44/56 [00:59<00:16,  1.36s/it] 80%|████████  | 45/56 [01:00<00:14,  1.35s/it] 82%|████████▏ | 46/56 [01:02<00:13,  1.35s/it] 84%|████████▍ | 47/56 [01:03<00:12,  1.35s/it] 86%|████████▌ | 48/56 [01:04<00:10,  1.36s/it] 88%|████████▊ | 49/56 [01:06<00:09,  1.36s/it] 89%|████████▉ | 50/56 [01:07<00:08,  1.36s/it] 91%|█████████ | 51/56 [01:08<00:06,  1.36s/it] 93%|█████████▎| 52/56 [01:10<00:05,  1.36s/it] 95%|█████████▍| 53/56 [01:11<00:04,  1.36s/it] 96%|█████████▋| 54/56 [01:13<00:02,  1.36s/it] 98%|█████████▊| 55/56 [01:14<00:01,  1.36s/it]100%|██████████| 56/56 [01:15<00:00,  1.16s/it]100%|██████████| 56/56 [01:15<00:00,  1.34s/it]
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/numpy/lib/_function_base_impl.py:3045: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[:, None]
+/home/hoyeon/anaconda3/envs/sc/lib/python3.10/site-packages/numpy/lib/_function_base_impl.py:3046: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[None, :]
+Weighted F1 score: 0.8725757580543881
+Macro F1 score: 0.7859436443795569
