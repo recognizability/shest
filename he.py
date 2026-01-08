@@ -89,11 +89,10 @@ for region in tqdm(regions):
     except:
         continue
 
-    coords = region.coords.astype(np.int32)
     polygon_shifted = np.array([[
         int(round(tile*(y_coord - y_lower) / upper)), 
         int(round(tile*(x_coord - x_left) / upper))
-    ] for y_coord, x_coord in coords])
+    ] for y_coord, x_coord in region.coords])
     images[cell_id] = quadruple_tile(window_image, polygon_shifted)
     centroids[cell_id] = (y, x)
 
@@ -106,7 +105,7 @@ modeling = Modeling(args, config_model, data)
 adata_inferred = modeling.adata_inferred
 colors_predicted = adata_inferred.obs['cell_type'].map(config_model.palette_type)
 common_cells = set(colors_predicted.index) & set(images.keys())
-adata_inferred.obs['cell_type'].value_counts()
+print(adata_inferred.obs['cell_type'].value_counts())
 
 adata_inferred.write_h5ad(args.directory + f"results/cell_type_prediction/{stem}.h5ad")
 
