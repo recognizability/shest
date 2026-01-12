@@ -1,16 +1,6 @@
 # SHEST
 Single-cell-level artificial intelligence from haematoxylin and eosin morphology for cell type prediction and spatial transcriptomics reconstruction
 
-## Prerequisites
-
-|Package|Version|
-|---|---|
-|python|3.10|
-|scanpy|1.10.4|
-|spatialdata|0.5.0|
-|torch|2.6.0+cu124|
-|timm|1.0.15|
-
 ## Installation
 ```
 conda create -n shest python=3.10 scanpy==1.10.4 spatialdata==0.5.0 tacco libpysal esda -c conda-forge -c bioconda
