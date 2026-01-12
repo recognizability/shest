@@ -520,4 +520,4 @@ class Modeling():
         self.adata_inferred.obs[self.cell_type] = pd.Categorical(self.adata_inferred.obs[self.cell_type], categories=self.cell_types.keys(), ordered=True)
         self.adata_inferred.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
         self.adata_inferred.obsm['embeddings'] = embeddings
-        self.adata_inferred.write_h5ad(self.directory + f"results/adata_inferred_{self.stem_file}_{self.cell_type}.h5ad")
+#        self.adata_inferred.write_h5ad(self.directory + f"results/adata_inferred_{self.stem_file}_{self.cell_type}.h5ad")
