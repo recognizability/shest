@@ -7,6 +7,7 @@ from tqdm import tqdm
 import math
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 import openslide
 import matplotlib.pyplot as plt
@@ -16,11 +17,6 @@ from skimage.measure import regionprops, find_contours
 from skimage.draw import polygon2mask
 from skimage.color import rgb2hed, hed2rgb
 from cellpose import models, io
-
-import torch
-import torch.nn.functional as F
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
 
 from config import n_cores, generator, tile, Config, lower_micrometer, upper_micrometer
 from data import Images, quadruple_tile
@@ -37,7 +33,8 @@ parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
 args_additional = parser.parse_args(remaining)
 args.wsi = args_additional.wsi
 stem = '.'.join(args.wsi.split('/')[-1].split('.')[:-1])
-path_stem = args.directory + f"he/{stem}"
+path_stem = Path(args.directory) / "he" / stem
+path_stem.parent.mkdir(parents=True, exist_ok=True)
 
 slide = openslide.OpenSlide(args.wsi)
 pixel_size = float(slide.properties['openslide.mpp-x'])
@@ -48,11 +45,11 @@ half = upper // 2
 print("Loading raw image ...", end=' ')
 image_raw = slide.read_region((0, 0), 0, slide.level_dimensions[0])
 print("done.")
-print("Making it to a image array ...", end=' ')
+print("Making it to an image array ...", end=' ')
 image = np.array(image_raw)[:, :, :3]
 print("done.")
 
-masks_file = path_stem + "_masks.npy"
+masks_file = path_stem.with_name(path_stem.name + "_masks.npy")
 if not os.path.exists(masks_file):
     model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
@@ -67,8 +64,8 @@ else:
 regions = regionprops(masks)
 print(len(regions), "cell masks are prepared.")
 
-images_file = path_stem + "_images.pkl"
-centroids_file = path_stem + "_centroids.pkl"
+images_file = path_stem.with_name(path_stem.name + "_images.pkl")
+centroids_file = path_stem.with_name(path_stem.name + "_centroids.pkl")
 if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)):
     images = {}
     centroids = {}
@@ -116,7 +113,9 @@ adata_inferred = modeling.adata_inferred
 colors_predicted = adata_inferred.obs['cell_type'].map(config_model.palette_type)
 common_cells = set(colors_predicted.index) & set(images.keys())
 print(adata_inferred.obs['cell_type'].value_counts())
-adata_inferred.write_h5ad(path_stem + ".h5ad")
+print("Saving the expressions and the cell types ...", end=' ')
+adata_inferred.write_h5ad(path_stem.with_name(path_stem.name + ".h5ad"))
+print("done.")
 
 segments = []
 colors = []
@@ -141,7 +140,7 @@ ax.imshow(image)
 ax.add_collection(LineCollection(segments, colors=colors, linewidths=1))
 ax.set_xlim(0, width)
 ax.set_ylim(height, 0)
-print("Saving the image colored ...")
-plt.savefig(path_stem + ".png", bbox_inches='tight')
+print("Saving the image colored ...", end=' ')
+plt.savefig(path_stem.with_name(path_stem.name + ".png"), bbox_inches="tight")
 plt.close()
 print("done.")
