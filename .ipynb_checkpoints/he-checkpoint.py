@@ -7,7 +7,6 @@ from tqdm import tqdm
 import math
 import numpy as np
 import pandas as pd
-import scanpy as sc
 from pathlib import Path
 
 import openslide
@@ -16,9 +15,10 @@ import matplotlib.gridspec as gridspec
 from matplotlib.collections import LineCollection
 from skimage.measure import regionprops, find_contours
 from skimage.draw import polygon2mask
-from cellpose import models, io, utils
-from shapely.geometry import Polygon, mapping
-import cv2
+from skimage.color import rgb2hed, hed2rgb
+from cellpose import models, io
+import geopandas as gpd
+from shapely.geometry import Polygon
 import json
 
 from config import n_cores, generator, tile, Config, lower_micrometer, upper_micrometer
@@ -33,7 +33,6 @@ args.mode = "infer"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
-parser.add_argument("--save_image", action="store_true", help="Save a colored image file")
 args_additional = parser.parse_args(remaining)
 args.wsi = args_additional.wsi
 stem = '.'.join(args.wsi.split('/')[-1].split('.')[:-1])
@@ -67,6 +66,8 @@ else:
 
 regions = regionprops(masks)
 print(len(regions), "cell masks are prepared.")
+outlines = utils.outlines_list(masks)
+print(len(outlines), "cell outlines are prepared.")
 
 images_file = path_stem.with_name(path_stem.name + "_images.pkl")
 centroids_file = path_stem.with_name(path_stem.name + "_centroids.pkl")
@@ -89,13 +90,16 @@ if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)):
             window_image = np.transpose(window_image, (2, 0, 1))
         except:
             continue
+
         polygon_shifted = np.array([[y_coord - y_lower, x_coord - x_left] for y_coord, x_coord in region.coords])
         images[cell_id] = quadruple_tile(window_image, polygon_shifted, upper)
         centroids[cell_id] = (y_centroid, x_centroid)
+
     print("Saving the images and centroids ...", end=' ')
     joblib.dump(images, os.path.join(images_file), compress=0)
     joblib.dump(centroids, os.path.join(centroids_file), compress=0)
     print("done.")
+
 else:
     print("Loading the images and centroids...", end=' ')
     with open(file=os.path.join(images_file), mode='rb') as f:
@@ -103,96 +107,56 @@ else:
     with open(file=os.path.join(centroids_file), mode='rb') as f:
         centroids = joblib.load(f)
     print("done.")
+
 print(len(images), "cell images are prepared.")
 
 config_model = Config(args)
-adata_file = path_stem.with_name(path_stem.name + ".h5ad")
-if not os.path.exists(adata_file):
-    data = Images(args, pixel_size, centroids, images)
-    modeling = Modeling(args, config_model, data)
-    adata_inferred = modeling.adata_inferred
-    print("Saving the expressions and the cell types ...", end=' ')
-    adata_inferred.write_h5ad(adata_file)
-    print("done.")
-else:
-    print("Loading the adata file ...", end=' ')
-    adata_inferred = sc.read_h5ad(adata_file)
-    print("done.")
+data = Images(args, pixel_size, centroids, images)
+modeling = Modeling(args, config_model, data)
 
-print(adata_inferred)
-print(adata_inferred.obs['cell_type'].value_counts())
+adata_inferred = modeling.adata_inferred
 colors_predicted = adata_inferred.obs['cell_type'].map(config_model.palette_type)
 common_cells = set(colors_predicted.index) & set(images.keys())
+print(adata_inferred.obs['cell_type'].value_counts())
+print("Saving the expressions and the cell types ...", end=' ')
+adata_inferred.write_h5ad(path_stem.with_name(path_stem.name + ".h5ad"))
+print("done.")
 
-print("Selecting the cells from the prediction ...", end=' ')
 segments = []
 colors = []
-polygons = []
-cell_types = []
+print("Selecting the cells from the prediction ...")
 for region in tqdm(regions):
     cell_id = str(region.label)
-    if not cell_id in common_cells:
-        continue
-    color = colors_predicted.loc[cell_id]
-    if pd.isna(color):
-        continue
-    mask = (region.image.astype(np.uint8)) * 255
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        continue
-    valid_contours = [c for c in contours if len(c) >= 4]
-    if not valid_contours:
-        continue
-    colors.append(color)
-    contour = max(valid_contours, key=len)
-    contour = contour.reshape(-1, 2)
-    segment = contour + np.array([region.bbox[1], region.bbox[0]])
-    if len(segment) < 4:
-        continue
-    segments.append(segment)
-    polygon = Polygon(segment)
-    polygons.append(polygon)
-    cell_type = adata_inferred.obs.loc[cell_id, 'cell_type']
-    cell_types.append(cell_type)
+    if cell_id in common_cells:
+        color_predicted = colors_predicted.loc[cell_id]
+        if not pd.isna(color_predicted):
+            contours = find_contours(region.image, 0.5)
+            for contour in contours:
+                contour_shifted = contour + region.bbox[:2]
+                segments.append(contour_shifted[:, ::-1])
+                colors.append(color_predicted)
+height = image.shape[0]
+width = image.shape[1]
+if width >= height:
+    fig, ax = plt.subplots(figsize=(200*width//width, 200*height//width))
+else:
+    fig, ax = plt.subplots(figsize=(200*width//height, 200*height//height))
+ax.imshow(image)    
+ax.add_collection(LineCollection(segments, colors=colors, linewidths=1))
+ax.set_xlim(0, width)
+ax.set_ylim(height, 0)
+print("Saving an image colored ...", end=' ')
+plt.savefig(path_stem.with_name(path_stem.name + ".png"), bbox_inches="tight")
+plt.close()
 print("done.")
-print(len(segments), "segments are prepared.")
 
-print("Serializing geojson ...", end=' ')
-features = []
-for i, polygon in tqdm(enumerate(polygons), total=len(polygons)):
-    if not polygon.is_valid or polygon.is_empty:
-        continue
-    rgb = [int(colors[i][c:c+2], 16) for c in (1, 3, 5)]
-    features.append({
-        "type": "Feature",
-        "geometry": mapping(polygon),
-        "properties": {
-            "cell_type": cell_types[i],
-            "color": rgb,
-        },
-    })
-print(len(features), "features are prepared.")
-geojson = {
-    "type": "FeatureCollection",
-    "features": features
-}
+polygons = []
+print("Convert outlines to Shapely Polygons ...")
+for outline in outlines:
+    if len(outline) > 2:
+        poly = Polygon(outline[:, ::-1])
+        polygons.append(poly)
 print("Saving a geojson file ...", end=' ')
-with open(path_stem.with_name(path_stem.name + ".geojson"), "w") as f:
-    json.dump(geojson, f)
+gdf = gpd.GeoDataFrame(geometry=polygons)
+gdf.to_file(path_stem.with_name(path_stem.name + ".geojson"), driver='GeoJSON')
 print("done.")
-
-if args_additional.save_image:
-    height = image.shape[0]
-    width = image.shape[1]
-    if width >= height:
-        fig, ax = plt.subplots(figsize=(200*width//width, 200*height//width))
-    else:
-        fig, ax = plt.subplots(figsize=(200*width//height, 200*height//height))
-    ax.imshow(image)    
-    ax.add_collection(LineCollection(segments, colors=colors, linewidths=1))
-    ax.set_xlim(0, width)
-    ax.set_ylim(height, 0)
-    print("Saving an image colored ...", end=' ')
-    plt.savefig(path_stem.with_name(path_stem.name + ".png"), bbox_inches="tight")
-    plt.close()
-    print("done.")
