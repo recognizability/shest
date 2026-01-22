@@ -33,9 +33,10 @@ args.mode = "infer"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
-parser.add_argument("--save_image", action="store_true", help="Save a colored image file")
+parser.add_argument("--save_colored_image", action="store_true", help="Save a colored image file")
 args_additional = parser.parse_args(remaining)
 args.wsi = args_additional.wsi
+args.save_colored_image = args_additional.save_colored_image
 stem = '.'.join(args.wsi.split('/')[-1].split('.')[:-1])
 path_stem = Path(args.directory) / "he" / stem
 path_stem.parent.mkdir(parents=True, exist_ok=True)
@@ -140,11 +141,8 @@ for region in tqdm(regions):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         continue
-    valid_contours = [c for c in contours if len(c) >= 4]
-    if not valid_contours:
-        continue
     colors.append(color)
-    contour = max(valid_contours, key=len)
+    contour = max(contours, key=len)
     contour = contour.reshape(-1, 2)
     segment = contour + np.array([region.bbox[1], region.bbox[0]])
     if len(segment) < 4:
@@ -181,13 +179,14 @@ with open(path_stem.with_name(path_stem.name + ".geojson"), "w") as f:
     json.dump(geojson, f)
 print("done.")
 
-if args_additional.save_image:
+if args.save_colored_image:
     height = image.shape[0]
     width = image.shape[1]
+    scale = 100
     if width >= height:
-        fig, ax = plt.subplots(figsize=(200*width//width, 200*height//width))
+        fig, ax = plt.subplots(figsize=(scale*width//width, scale*height//width))
     else:
-        fig, ax = plt.subplots(figsize=(200*width//height, 200*height//height))
+        fig, ax = plt.subplots(figsize=(scale*width//height, scale*height//height))
     ax.imshow(image)    
     ax.add_collection(LineCollection(segments, colors=colors, linewidths=1))
     ax.set_xlim(0, width)

@@ -19,7 +19,7 @@ def set_args(argv=None):
     parser.add_argument("--organ", type=str, default="lung", help="Organ of the sample")
     parser.add_argument("--cell_type", type=str, default="cell_type", help="Cell type to consider")
     parser.add_argument("--sc_annotate", action="store_true", help="Force annotation on the cells with a single cell reference")
-    parser.add_argument("--save_image", action="store_true", help="Force saving images")
+    parser.add_argument("--save_images", action="store_true", help="Force saving images")
     parser.add_argument("--batch_size", type=int, default=512, help="Batch size of data loader")
     parser.add_argument("--split", type=float, default=0.8, help="Spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")

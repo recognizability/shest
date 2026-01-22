@@ -82,7 +82,7 @@ class Preprocessing():
 
         self.image = self.sdata.images["he_image"]["scale0"]["image"].values
         self.height, self.width = self.image.shape[1:]
-        self.save_image = args.save_image
+        self.save_images = args.save_images
 
         self.annotated_cell_ids = None
         self.image_ids = None
@@ -189,7 +189,7 @@ class Preprocessing():
         os.makedirs(images_directory, exist_ok=True)
         images_file = images_directory + f"images.pkl"
         centroids_file = images_directory + f"centroids.pkl"
-        if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)) or self.save_image:
+        if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)) or self.save_images:
             lower = int(round(lower_micrometer/self.pixel_size)) #pixels
             upper = int(round(upper_micrometer/self.pixel_size)) #pixels
             half = upper // 2
