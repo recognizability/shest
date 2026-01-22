@@ -33,9 +33,13 @@ args.mode = "infer"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
+parser.add_argument("--batch_size_cellpose", type=int, default=8, help="Batch size of cellpose")
+parser.add_argument("--cutoff", type=float, default=0.7, help="Lower bound of prediction probability")
 parser.add_argument("--save_colored_image", action="store_true", help="Save a colored image file")
 args_additional = parser.parse_args(remaining)
 args.wsi = args_additional.wsi
+args.batch_size_cellpose = args_additional.batch_size_cellpose
+args.cutoff = args_additional.cutoff
 args.save_colored_image = args_additional.save_colored_image
 stem = '.'.join(args.wsi.split('/')[-1].split('.')[:-1])
 path_stem = Path(args.directory) / "he" / stem
@@ -58,7 +62,7 @@ masks_file = path_stem.with_name(path_stem.name + "_masks.npy")
 if not os.path.exists(masks_file):
     model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
-    masks, flows, styles = model.eval(image)
+    masks, flows, styles = model.eval(image, batch_size=args.batch_size_cellpose)
     np.save(masks_file, masks)
     print("done.")
 else:
@@ -121,6 +125,7 @@ else:
     print("done.")
 
 print(adata_inferred)
+adata_inferred.obs.loc[adata_inferred.obs['probability'] < args.cutoff, 'cell_type'] = np.nan
 print(adata_inferred.obs['cell_type'].value_counts())
 colors_predicted = adata_inferred.obs['cell_type'].map(config_model.palette_type)
 common_cells = set(colors_predicted.index) & set(images.keys())

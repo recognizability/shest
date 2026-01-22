@@ -182,7 +182,7 @@ class Modeling():
         self.criterion_classification = nn.NLLLoss()
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
 
-        self.cutoff = args.cutoff
+#        self.cutoff = args.cutoff
 
         self.images = None
         self.expressions = None
@@ -483,6 +483,7 @@ class Modeling():
         predictions = []
         prediction_probabilities = []
         reconstructions = []
+        probabilities = []
         
         print(f"Inferring with the {self.cell_type} prediction model ...")
         with torch.no_grad():
@@ -493,31 +494,28 @@ class Modeling():
                     embedding, log_prob, mean, overdispersion, probability = self.model(image)
                 embeddings.append(embedding.detach().cpu())
                 log_probability, prediction = torch.max(log_prob, dim=1)
-                prediction[log_probability.exp() < self.cutoff] = -1
                 predictions.append(prediction.detach().cpu())
                 reconstruction = (1 - probability) * mean
                 reconstructions.append(reconstruction.detach().cpu())
+                probabilities.append(log_probability.exp().detach().cpu())
 
                 del image, embedding, log_prob, mean, overdispersion, probability
 
         embeddings = torch.cat(embeddings).numpy()
         predictions = torch.cat(predictions).numpy()
         reconstructions = torch.round(torch.cat(reconstructions)).int().numpy() #integer type
+        probabilities = torch.cat(probabilities).numpy()
 
         gc.collect()
         torch.cuda.empty_cache()
 
-        mask = predictions == -1
-        predictions_masked = np.empty(predictions.shape, dtype=object)
-        predictions_masked[mask] = np.nan
-        predictions_masked[~mask] = self.label_encoder.inverse_transform(predictions[~mask])
+        predictions = self.label_encoder.inverse_transform(predictions)
         self.adata_inferred = anndata.AnnData(
             X = reconstructions,
             var = pd.DataFrame(index=self.gene_panel),
-            obs = pd.DataFrame({self.cell_type: predictions_masked}, index=cell_ids),
+            obs = pd.DataFrame({self.cell_type: predictions, "probability": probabilities}, index=cell_ids),
             obsm = {"pixel": self.centroids, "spatial": self.spatial},
         )
         self.adata_inferred.obs[self.cell_type] = pd.Categorical(self.adata_inferred.obs[self.cell_type], categories=self.cell_types.keys(), ordered=True)
         self.adata_inferred.uns[self.cell_type+'_colors'] = [self.palette[ct] for ct in self.cell_types.keys()]
         self.adata_inferred.obsm['embeddings'] = embeddings
-#        self.adata_inferred.write_h5ad(self.directory + f"results/adata_inferred_{self.stem_file}_{self.cell_type}.h5ad")
