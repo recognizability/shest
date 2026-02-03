@@ -20,7 +20,7 @@ Command to infer from a WSI file
 ```
 python he.py --wsi {svs file path}
 ```
-At this point, Cellpose is used for nuclear segmentation. The output files consist of h5ad files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
+At this point, Cellpose is used for nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
 |Cell type|Color|
 |---|---|
 |`Alveolar_cell`|Pink|
