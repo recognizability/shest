@@ -41,3 +41,16 @@ The cell type annotation file `he_annotation.csv` must be located under the `DIR
 ```
 python main.py
 ```
+
+## Citation
+<https://academic.oup.com/bib/article/27/1/bbag037/8488669>
+```
+@article{jeong2025shest,
+  title={SHEST: Single-cell-level artificial intelligence from haematoxylin and eosin morphology for cell type prediction and spatial transcriptomics reconstruction},
+  author={Jeong, Hoyeon and Oh, Junghan and Lee, Donggeon and Kang, Jae Hwan and Choi, Yoon-La},
+  journal={bioRxiv},
+  pages={2025--11},
+  year={2025},
+  publisher={Cold Spring Harbor Laboratory}
+}
+```
