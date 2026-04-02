@@ -45,12 +45,15 @@ python main.py
 ## Citation
 <https://academic.oup.com/bib/article/27/1/bbag037/8488669>
 ```
-@article{jeong2025shest,
-  title={SHEST: Single-cell-level artificial intelligence from haematoxylin and eosin morphology for cell type prediction and spatial transcriptomics reconstruction},
+@article{jeong2026shest,
+  title={SHEST: single-cell-level artificial intelligence from haematoxylin and eosin morphology for cell-type prediction and spatial transcriptomics reconstruction},
   author={Jeong, Hoyeon and Oh, Junghan and Lee, Donggeon and Kang, Jae Hwan and Choi, Yoon-La},
-  journal={bioRxiv},
-  pages={2025--11},
-  year={2025},
-  publisher={Cold Spring Harbor Laboratory}
+  journal={Briefings in Bioinformatics},
+  volume={27},
+  number={1},
+  pages={bbag037},
+  year={2026},
+  publisher={Oxford University Press},
+  keywords={published, selected},
 }
 ```
