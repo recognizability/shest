@@ -20,7 +20,8 @@ Command to infer from a WSI file
 ```
 python he.py --wsi {svs file path}
 ```
-At this point, Cellpose is used for nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
+* The `file path` of the WSI file and the `path` of the processing directory must be specified as command-line arguments. Model weight `*.pth` files must be located under `models` within the `path`, and result files are generated in the `he` directory under the `path`.
+* During processing, Cellpose is used for nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
 |Cell type|Color|
 |---|---|
 |`Alveolar_cell`|Pink|
@@ -31,16 +32,16 @@ At this point, Cellpose is used for nuclear segmentation. The output files consi
 |`Lymphocyte`|Blue|
 
 ## Advanced usage
+### Command for model test
+```
+python main.py
+```
+
 ### Command for model training
 ```
 python main.py --mode train
 ```
 The cell type annotation file `he_annotation.csv` must be located under the `DIRECTORY/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the schema `cell_id,group`.
-
-### Command for model test
-```
-python main.py
-```
 
 ## Citation
 <https://academic.oup.com/bib/article/27/1/bbag037/8488669>

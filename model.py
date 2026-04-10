@@ -182,8 +182,6 @@ class Modeling():
         self.criterion_classification = nn.NLLLoss()
         self.criterion_reconstruction = ZeroInflatedNegativeBinomialLoss()
 
-#        self.cutoff = args.cutoff
-
         self.images = None
         self.expressions = None
         self.embeddings = None
@@ -296,7 +294,10 @@ class Modeling():
 
             if not escape:
                 print(f"Saving the weights into {weights_file} ... ", end='')
-                torch.save(self.model.state_dict(), weights_file)
+                torch.save({
+                    'classifier': self.model.classifier.state_dict(),
+                    'reconstructor': self.model.reconstructor.state_dict()
+                }, weights_file)
                 print("done.")
 
             gc.collect()
@@ -304,7 +305,9 @@ class Modeling():
 
         elif self.mode in ['test', 'infer']: 
             print(f"Loading the weights from {weights_file} ... ", end='')
-            self.model.load_state_dict(torch.load(weights_file, map_location=device))
+            checkpoint = torch.load(weights_file, map_location=device)
+            self.model.classifier.load_state_dict(checkpoint['classifier'])
+            self.model.reconstructor.load_state_dict(checkpoint['reconstructor'])
             print("done.")
 
     def validate(self, test_loader=None):
