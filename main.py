@@ -12,7 +12,7 @@ def set_args(argv=None):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--raw_directory", type=str, default="/data0/", help="Directory of raw data")
-    parser.add_argument("--directory", type=str, default="/data0/crp/", help="Working directory ")
+    parser.add_argument("--directory", type=str, default="/data0/crp/", help="Working directory")
     parser.add_argument("--platform", type=str, default="Xenium_Prime", help="Platform of spatial transcriptomics")
     parser.add_argument("--sources", type=str, nargs="+", default=["10X", "SMC", "SMC"], help="Data sources")
     parser.add_argument("--samples", type=str, nargs="+", default=["Human_Lung_Cancer", "03320", "03331"], help="Sample names")

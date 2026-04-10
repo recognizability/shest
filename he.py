@@ -36,6 +36,8 @@ parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
 parser.add_argument("--cutoff", type=float, default=0.7, help="Lower bound of prediction probability")
 parser.add_argument("--save_colored_image", action="store_true", help="Save a colored image file")
 args_additional = parser.parse_args(remaining)
+if hasattr(args_additional, "directory") and args_additional.directory is not None:
+    args.directory = args_additional.directory
 args.wsi = args_additional.wsi
 args.cutoff = args_additional.cutoff
 args.save_colored_image = args_additional.save_colored_image
