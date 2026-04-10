@@ -21,6 +21,7 @@ Command to infer from a WSI file
 python he.py --wsi {file_path} --directory {path}
 ```
 * The `file_path` of the WSI file and the `path` of the processing directory must be specified as command-line arguments. Model weight `*.pth` files must be located under `models` within the `path`, and result files are generated in the `he` directory under the `path`.
+* The model weight file is available for download on this Hugging Face page: https://huggingface.co/recognizability/shest/tree/main 
 * During processing, Cellpose is used for nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
 
 |Cell type|Color|
