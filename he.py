@@ -35,12 +35,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
 parser.add_argument("--cutoff", type=float, default=0.7, help="Lower bound of prediction probability")
 parser.add_argument("--save_colored_image", action="store_true", help="Save a colored image file")
+parser.add_argument("--save_temp_files", action="store_true", help="Save tenporary files including images and centroids")
 args_additional = parser.parse_args(remaining)
 if hasattr(args_additional, "directory") and args_additional.directory is not None:
     args.directory = args_additional.directory
 args.wsi = args_additional.wsi
 args.cutoff = args_additional.cutoff
 args.save_colored_image = args_additional.save_colored_image
+args.save_temp_files = args_additional.save_temp_files
 stem = '.'.join(args.wsi.split('/')[-1].split('.')[:-1])
 path_stem = Path(args.directory) / "he" / stem
 path_stem.parent.mkdir(parents=True, exist_ok=True)
@@ -58,24 +60,36 @@ print("Making it to an image array ...", end=' ')
 image = np.array(image_raw)[:, :, :3]
 print("done.")
 
-masks_file = path_stem.with_name(path_stem.name + "_masks.npy")
+masks_file = path_stem.with_name(path_stem.name + "_masks.npz")
 if not os.path.exists(masks_file):
     model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
     masks, flows, styles = model.eval(image)
-    np.save(masks_file, masks)
+    max_cells = masks.max()
+    if max_cells <= 255:
+        masks = masks.astype(np.uint8)
+    elif max_cells <= 65535:
+        masks = masks.astype(np.uint16)
+    np.savez_compressed(masks_file, masks=masks)
     print("done.")
 else:
     print("Loading the segmentation masks ...", end=' ')
-    masks = np.load(masks_file)
+    masks = np.load(masks_file)['masks']
     print("done.")
 
 regions = regionprops(masks)
 print(len(regions), "cell masks are prepared.")
 
-images_file = path_stem.with_name(path_stem.name + "_images.pkl")
-centroids_file = path_stem.with_name(path_stem.name + "_centroids.pkl")
-if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)):
+images_file = path_stem.with_name(path_stem.name + "_images.gz")
+centroids_file = path_stem.with_name(path_stem.name + "_centroids.gz")
+if args.save_temp_files and os.path.exists(images_file) and os.path.exists(centroids_file):
+    print("Loading the images and centroids...", end=' ')
+    with open(file=os.path.join(images_file), mode='rb') as f:
+        images = joblib.load(f)
+    with open(file=os.path.join(centroids_file), mode='rb') as f:
+        centroids = joblib.load(f)
+    print("done.")
+else:
     images = {}
     centroids = {}
     for region in tqdm(regions):
@@ -97,17 +111,11 @@ if (not os.path.exists(images_file)) or (not os.path.exists(centroids_file)):
         polygon_shifted = np.array([[y_coord - y_lower, x_coord - x_left] for y_coord, x_coord in region.coords])
         images[cell_id] = quadruple_tile(window_image, polygon_shifted, upper)
         centroids[cell_id] = (y_centroid, x_centroid)
-    print("Saving the images and centroids ...", end=' ')
-    joblib.dump(images, os.path.join(images_file), compress=0)
-    joblib.dump(centroids, os.path.join(centroids_file), compress=0)
-    print("done.")
-else:
-    print("Loading the images and centroids...", end=' ')
-    with open(file=os.path.join(images_file), mode='rb') as f:
-        images = joblib.load(f)
-    with open(file=os.path.join(centroids_file), mode='rb') as f:
-        centroids = joblib.load(f)
-    print("done.")
+    if args.save_temp_files:
+        print("Saving the images and centroids ...", end=' ')
+        joblib.dump(images, os.path.join(images_file), compress=True)
+        joblib.dump(centroids, os.path.join(centroids_file), compress=True)
+        print("done.")
 print(len(images), "cell images are prepared.")
 
 config_model = Config(args)
