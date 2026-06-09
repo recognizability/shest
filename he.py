@@ -64,7 +64,7 @@ masks_file = path_stem.with_name(path_stem.name + "_masks.npz")
 if not os.path.exists(masks_file):
     model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
-    masks, flows, styles = model.eval(image)
+    masks, flows, styles = model.eval(image, batch_size=1)
     max_cells = masks.max()
     if max_cells <= 255:
         masks = masks.astype(np.uint8)
