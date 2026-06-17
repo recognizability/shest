@@ -60,7 +60,7 @@ print("Making it to an image array ...", end=' ')
 image = np.array(image_raw)[:, :, :3]
 print("done.")
 
-masks_file = path_stem.with_name(path_stem.name + "_masks.npz")
+masks_file = path_stem.with_name(path_stem.name + ".npz")
 if not os.path.exists(masks_file):
     model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
