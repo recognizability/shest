@@ -40,7 +40,7 @@ python he.py --wsi {file_path} --directory {path}
 ## Advanced usage
 ### Command for model test
 ```
-python main.py
+python main.py --mode test
 ```
 
 ### Command for model training
