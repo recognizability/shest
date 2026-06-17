@@ -21,10 +21,27 @@ from shapely.geometry import Polygon, mapping
 import cv2
 import json
 
+import tensorflow as tf
+from PIL import Image
+from csbdeep.utils import normalize
+from stardist.models import StarDist2D
+
 from config import n_cores, generator, tile, Config, lower_micrometer, upper_micrometer
 from data import Images, quadruple_tile
 from model import Modeling
 from main import set_args
+
+os.environ["OMP_NUM_THREADS"] = str(n_cores)
+os.environ["MKL_NUM_THREADS"] = str(n_cores)
+os.environ["OPENBLAS_NUM_THREADS"] = str(n_cores)
+tf.config.threading.set_inter_op_parallelism_threads(n_cores)
+tf.config.threading.set_intra_op_parallelism_threads(n_cores)
+Image.MAX_IMAGE_PIXELS = None
+
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
 
 args, remaining = set_args()
 args.batch_size = 1024
@@ -32,6 +49,7 @@ args.split = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
+parser.add_argument("--segmentation", type=str, default='cellpose', help="Choose a nucleus segmentation method between cellpose and stardist")
 parser.add_argument("--cutoff", type=float, default=0.7, help="Lower bound of prediction probability")
 parser.add_argument("--save_colored_image", action="store_true", help="Save a colored image file")
 parser.add_argument("--save_temp_files", action="store_true", help="Save tenporary files including images and centroids")
@@ -61,14 +79,21 @@ print("done.")
 
 masks_file = path_stem.with_name(path_stem.name + ".npz")
 if not os.path.exists(masks_file):
-    model = models.CellposeModel(gpu=True)
     print("Segmenting the nuclei of cells ...", end=' ')
-    masks, flows, styles = model.eval(image, batch_size=1)
+    if args.segmentation == 'cellpose':
+        model = models.CellposeModel(gpu=False)
+        masks, flows, styles = model.eval(image)
+    elif args.segmentation == 'stardist':
+        model = StarDist2D.from_pretrained('2D_versatile_he')
+        n_tiles = model._guess_n_tiles(image)
+        masks, details = model.predict_instances(image, n_tiles=n_tiles, prob_thresh=0.65, nms_thresh=0.4, verbose=True,)
     max_cells = masks.max()
     if max_cells <= 255:
         masks = masks.astype(np.uint8)
     elif max_cells <= 65535:
         masks = masks.astype(np.uint16)
+    else:
+        masks = masks.astype(np.uint32)
     np.savez_compressed(masks_file, masks=masks)
     print("done.")
 else:
