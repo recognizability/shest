@@ -24,7 +24,7 @@ def set_args(argv=None):
     parser.add_argument("--split", type=float, default=0.8, help="Spit ratio for training dataset")
     parser.add_argument("--epochs", type=int, default=40, help="Number of epochs in training")
     parser.add_argument("--lr", type=float, default=0.01, help="Learning rate of optimiser")
-    parser.add_argument("--mode", type=str, default="test", help="Choose between train, test or infer")
+    parser.add_argument("--mode", type=str, default="infer", help="Choose between train, test or infer")
     args, remaining = parser.parse_known_args(argv)
     return args, remaining
 
