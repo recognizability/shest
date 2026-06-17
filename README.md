@@ -21,10 +21,10 @@ cd shest
 ## Execution
 Command to infer from a WSI file
 ```
-python he.py --wsi {file_path} --directory {path}
+python he.py --wsi FILE_PATH --directory PATH
 ```
-* The `file_path` of the WSI file and the `path` of the execution directory must be specified as command-line arguments.
-* Model weight `*.pth` files must be located under `models` within the `path`, and result files are generated in the `he` directory under the `path`.
+* The `FILE_PATH` of the WSI file and the `PATH` of the execution directory must be specified as command-line arguments.
+* Model weight `*.pth` files must be located under `models` within the `PATH`, and result files are generated in the `he` directory under the `PATH`.
 * The model weight file is available for download on this Hugging Face page: https://huggingface.co/recognizability/shest
 * During processing, Cellpose is used for nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
 
@@ -47,7 +47,7 @@ python main.py --mode test
 ```
 python main.py --mode train
 ```
-The cell type annotation file `he_annotation.csv` must be located under the `DIRECTORY/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the schema `cell_id,group`.
+The cell type annotation file `he_annotation.csv` must be located under the `PATH/dataset/PLATFORM/SOURCE/SAMPLE/annotation/` directory, with the schema `cell_id,group`.
 
 ## Citation
 <https://academic.oup.com/bib/article/27/1/bbag037/8488669>
