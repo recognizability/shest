@@ -29,7 +29,6 @@ from main import set_args
 args, remaining = set_args()
 args.batch_size = 1024
 args.split = 0
-args.mode = "infer"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--wsi", type=str, help="Path of a whole slide image file")
