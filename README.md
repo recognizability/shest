@@ -14,6 +14,7 @@ pip install spatialdata-io timm==1.0.15 opencv-python squidpy cellpose openslide
 git clone https://github.com/recognizability/shest.git
 cd shest
 ```
+* After installation, create a `gene_panels` directory and place the `XeniumPrimeHuman5Kpan_tissue_pathways_metadata.csv` file from https://10xgen.com/prime-5k-human and the `Xenium_hMulti_v1_metadata_annotations.csv` file from https://10xgen.com/v1-human-multi under it.
 
 ## Execution
 Command to infer from a WSI file
