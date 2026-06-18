@@ -25,7 +25,7 @@ python he.py --wsi FILE_PATH --directory PATH
 ```
 * **Input:** This is applicable only to 40x H&E whole slide image (WSI). The `FILE_PATH` of the WSI file and the `PATH` of the execution directory must be specified as command-line arguments.
 * **Model:** Model weight `*.pth` files must be located under `models` within the `PATH`, and result files are generated in the `he` directory under the `PATH`. The model weight file is available for download on this Hugging Face page: https://huggingface.co/recognizability/shest
-* **Ouyput:** During processing, inference follows nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
+* **Output:** During processing, inference follows nuclear segmentation. The output files consist of `h5ad` files with cell-level expression reconstruction and type prediction, and a `geojson` file containing cell types and their color information. The colors by cell type are as follows:
 
 |Cell type|Color|
 |---|---|
