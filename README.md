@@ -23,6 +23,7 @@ Command to infer from a WSI file
 ```
 python he.py --wsi FILE_PATH --directory PATH
 ```
+* This is applicable only to 40x H&E image.
 * The `FILE_PATH` of the WSI file and the `PATH` of the execution directory must be specified as command-line arguments.
 * Model weight `*.pth` files must be located under `models` within the `PATH`, and result files are generated in the `he` directory under the `PATH`.
 * The model weight file is available for download on this Hugging Face page: https://huggingface.co/recognizability/shest
